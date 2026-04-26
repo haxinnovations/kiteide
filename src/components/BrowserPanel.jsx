@@ -1,286 +1,239 @@
 import { useState, useRef, useEffect } from 'react'
-import { Sparkles, X, Send, LogIn, Loader2, ExternalLink, FileCode, Check, Zap } from 'lucide-react'
+import { Sparkles, X, Send, Loader2, FileCode, Check, Zap, FilePlus, Settings, Trash2, Key, ChevronDown, History } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import ReactMarkdown from 'react-markdown'
 
-const GEMINI_URL = 'https://gemini.google.com/';
+const BrowserPanel = ({ onClose, activeFile, onApplyEdits, onCreateFile }) => {
+  const models = [
+    'gemini-2.0-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-flash-lite-latest',
+    'gemini-flash-latest',
+    'gemini-pro-latest',
+    'gemini-2.5-pro',
+    'gemini-3.1-flash-lite-preview',
+    'gemini-3.1-pro-preview',
+    'gemini-3-flash-preview'
+  ];
 
-const BrowserPanel = ({ onClose, activeFile, onApplyEdits }) => {
-  const [loggedIn, setLoggedIn] = useState(() => localStorage.getItem('gemini-logged-in') === 'true');
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini-api-key') || '');
+  const [tempApiKey, setTempApiKey] = useState(apiKey);
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('gemini-selected-model') || 'gemini-2.0-flash');
+  const [contextLimit, setContextLimit] = useState(() => parseInt(localStorage.getItem('gemini-context-limit')) || 10);
+  const [showSettings, setShowSettings] = useState(false);
   const [useContext, setUseContext] = useState(true);
-  const [showWebview, setShowWebview] = useState(false);
   const [messages, setMessages] = useState(() => {
     const saved = localStorage.getItem('codepad-gemini-history');
     return saved ? JSON.parse(saved) : [];
   });
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const viewportRef = useRef(null);
   const messagesEndRef = useRef(null);
 
-  // Save messages to localStorage
+  // Sync temp key when settings open
+  useEffect(() => {
+    if (showSettings) setTempApiKey(apiKey);
+  }, [showSettings, apiKey]);
+
+  // Save state to localStorage
   useEffect(() => {
     localStorage.setItem('codepad-gemini-history', JSON.stringify(messages));
   }, [messages]);
 
-  // Scroll to bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    localStorage.setItem('gemini-api-key', apiKey);
+  }, [apiKey]);
+
+  useEffect(() => {
+    localStorage.setItem('gemini-selected-model', selectedModel);
+  }, [selectedModel]);
+
+  useEffect(() => {
+    localStorage.setItem('gemini-context-limit', contextLimit);
+  }, [contextLimit]);
+
+  // Scroll to bottom
+  const scrollToBottom = (smooth = true) => {
+    messagesEndRef.current?.scrollIntoView({ 
+      behavior: smooth ? 'smooth' : 'auto',
+      block: 'end'
+    });
+  };
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => scrollToBottom(), 100);
+    return () => clearTimeout(timeoutId);
   }, [messages, loading]);
 
-  // Boot Gemini offscreen on mount (if logged in)
   useEffect(() => {
-    if (loggedIn) {
-      invoke('open_browser', {
-        url: GEMINI_URL,
-        x: -9999, y: -9999,
-        width: 1024, height: 768
-      }).catch(console.error);
-    }
-    return () => {
-      invoke('hide_browser').catch(console.error);
-    };
-  }, [loggedIn]);
-
-  // Show webview for login
-  const handleShowLogin = async () => {
-    setShowWebview(true);
-    // Wait for the viewport to render
-    setTimeout(async () => {
-      if (viewportRef.current) {
-        const rect = viewportRef.current.getBoundingClientRect();
-        await invoke('open_browser', {
-          url: GEMINI_URL,
-          x: rect.left, y: rect.top,
-          width: rect.width, height: rect.height
-        });
-      }
-    }, 100);
-  };
-
-  // Resize webview with container  
-  useEffect(() => {
-    if (!showWebview || !viewportRef.current) return;
-    const observer = new ResizeObserver(() => {
-      if (!viewportRef.current) return;
-      const rect = viewportRef.current.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        invoke('resize_browser', {
-          x: rect.left, y: rect.top,
-          width: rect.width, height: rect.height
-        }).catch(console.error);
-      }
-    });
-    observer.observe(viewportRef.current);
-    return () => observer.disconnect();
-  }, [showWebview]);
-
-  const handleLoginDone = async () => {
-    setLoggedIn(true);
-    setShowWebview(false);
-    localStorage.setItem('gemini-logged-in', 'true');
-    // Move webview offscreen
-    await invoke('hide_browser').catch(console.error);
-    // Boot it offscreen for background use
-    await invoke('open_browser', {
-      url: GEMINI_URL,
-      x: -9999, y: -9999,
-      width: 1024, height: 768
-    }).catch(console.error);
-  };
-
-  const pollIntervalRef = useRef(null);
-
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
-    const text = input.trim();
-    setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: text }]);
-    setLoading(true);
-
-    try {
-      // Get baseline response count before sending
-      let baselineCount = 0;
-      try {
-        const preData = await invoke('read_gemini_response');
-        if (preData) {
-          const parts = preData.split(':');
-          baselineCount = parseInt(parts[0]) || 0;
-        }
-      } catch(e) {}
-
-      // Prepare context
-      let messageToSend = text;
-      if (useContext && activeFile) {
-        // Prepend line numbers to the code so Gemini can reference them accurately
-        const linesWithNumbers = activeFile.content.split('\n').map((line, i) => `${i + 1}: ${line}`).join('\n');
-        messageToSend = `[FILE CONTEXT: ${activeFile.name}]\n\`\`\`\n${linesWithNumbers}\n\`\`\`\n\n[USER QUERY]\n${text}`;
-      }
-
-      // Append System Prompt to force JSON output without newlines
-      const systemPrompt = ` | [SYSTEM INSTRUCTION: You are the native CodePad AI Assistant. Return your response strictly as a JSON object. If you suggest code changes, include an 'edits' array with objects containing 'startLine', 'endLine', and 'replacement' content. Format: {"reply": "markdown response", "edits": [{"startLine": 10, "endLine": 15, "replacement": "new code"}]}]`;
-      await invoke('send_to_gemini', { message: messageToSend + systemPrompt });
-
-      // Poll for new response
-      let attempts = 0;
-      const maxAttempts = 150; // Increased to ~2 minutes for longer JSON generations
-      let lastText = '';
-
-      const poll = async () => {
-        attempts++;
-        if (attempts > maxAttempts) {
-          clearInterval(pollIntervalRef.current);
-          setMessages(prev => [...prev, {
-            role: 'assistant',
-            content: '⏱️ Response timed out or was invalid. Here is the raw output:\n\n' + lastText
-          }]);
-          setLoading(false);
-          return;
-        }
-
-        try {
-          const data = await invoke('read_gemini_response');
-          if (!data) return;
-
-          // Format: count:done:base64payload
-          const colonIdx1 = data.indexOf(':');
-          const colonIdx2 = data.indexOf(':', colonIdx1 + 1);
-          if (colonIdx1 === -1 || colonIdx2 === -1) return;
-
-          const count = parseInt(data.substring(0, colonIdx1));
-          const payload = data.substring(colonIdx2 + 1);
-
-          if (count > baselineCount && payload) {
-            // Decode base64 → UTF-8 text
-            let decoded = '';
-            try {
-              decoded = decodeURIComponent(escape(atob(payload)));
-            } catch(e) {
-              decoded = atob(payload);
-            }
-
-            if (decoded && decoded.trim()) {
-              lastText = decoded.trim();
-
-              // Robust JSON extraction: Find the first '{' and last '}'
-              let jsonCandidate = lastText;
-              const firstBrace = jsonCandidate.indexOf('{');
-              const lastBrace = jsonCandidate.lastIndexOf('}');
-              
-              if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-                jsonCandidate = jsonCandidate.substring(firstBrace, lastBrace + 1);
-              }
- 
-              try {
-                const parsed = JSON.parse(jsonCandidate);
-                if (parsed && parsed.reply) {
-                  clearInterval(pollIntervalRef.current);
-                  setMessages(prev => [...prev, { 
-                    role: 'assistant', 
-                    content: parsed.reply,
-                    edits: parsed.edits // Store edits for later application
-                  }]);
-                  setLoading(false);
-                }
-              } catch (e) {
-                // Keep polling until JSON is complete
-              }
-            }
-          }
-        } catch(e) {
-          console.error('Poll error:', e);
-        }
-      };
-
-      // Start polling after a brief delay for Gemini to begin processing
-      setTimeout(() => {
-        pollIntervalRef.current = setInterval(poll, 800);
-      }, 1500);
-
-    } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err}` }]);
-      setLoading(false);
-    }
-  };
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    };
+    scrollToBottom(false);
   }, []);
 
   const clearHistory = () => {
     setMessages([]);
     localStorage.removeItem('codepad-gemini-history');
+    setShowSettings(false);
   };
 
-  // Login screen
-  if (!loggedIn && !showWebview) {
-    return (
-      <div className="browser-panel">
-        <div className="browser-header">
-          <div className="browser-header-title">
-            <Sparkles size={14} className="browser-icon" />
-            <span>Gemini</span>
-          </div>
-          <div className="browser-header-actions">
-            <button onClick={onClose} className="chat-action-btn"><X size={14} /></button>
-          </div>
-        </div>
-        <div className="gemini-login-screen">
-          <Sparkles size={40} className="gemini-login-icon" />
-          <h3>Connect to Gemini</h3>
-          <p>Sign in with your Google account to use Gemini directly inside CodePad — no API key needed.</p>
-          <button className="gemini-login-btn" onClick={handleShowLogin}>
-            <LogIn size={16} />
-            <span>Sign in to Google</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const handleSaveApiKey = () => {
+    setApiKey(tempApiKey);
+    localStorage.setItem('gemini-api-key', tempApiKey);
+    setShowSettings(false);
+  };
 
-  // Webview login screen
-  if (showWebview) {
-    return (
-      <div className="browser-panel">
-        <div className="browser-header">
-          <div className="browser-header-title">
-            <Sparkles size={14} className="browser-icon" />
-            <span>Sign in to Gemini</span>
-          </div>
-          <div className="browser-header-actions">
-            <button className="gemini-done-btn" onClick={handleLoginDone}>
-              Done
-            </button>
-            <button onClick={() => { setShowWebview(false); invoke('hide_browser'); }} className="chat-action-btn"><X size={14} /></button>
-          </div>
-        </div>
-        <div className="browser-viewport" ref={viewportRef} />
-      </div>
-    );
-  }
+  const handleSend = async () => {
+    if (!input.trim() || loading) return;
+    if (!apiKey) {
+      setShowSettings(true);
+      return;
+    }
 
-  // Chat UI (logged in)
+    const text = input.trim();
+    setInput('');
+    const newMessages = [...messages, { role: 'user', content: text }];
+    setMessages(newMessages);
+    setLoading(true);
+
+    try {
+      let prompt = text;
+      if (useContext && activeFile) {
+        const linesWithNumbers = activeFile.content.split('\n').map((line, i) => `${i + 1}: ${line}`).join('\n');
+        prompt = `[FILE CONTEXT: ${activeFile.name}]\n\`\`\`\n${linesWithNumbers}\n\`\`\`\n\n[USER QUERY]\n${text}`;
+      }
+
+      const systemInstruction = `You are the native CodePad AI Assistant. Return your response strictly as a JSON object. 
+CRITICAL: All code content in 'replacement' or 'content' MUST be properly JSON-escaped. Especially double quotes must be escaped as \\".
+For edits: include an 'edits' array with {'startLine', 'endLine', 'replacement'}. 
+For new files: include a 'newFile' object with {'name', 'content'}. 
+Format: {"reply": "markdown text", "edits": [], "newFile": null}`;
+
+      // Trim history based on contextLimit
+      const historyToKeep = messages.slice(-contextLimit);
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            ...historyToKeep.map(m => ({
+              role: m.role === 'assistant' ? 'model' : 'user',
+              parts: [{ text: m.content }]
+            })),
+            { role: 'user', parts: [{ text: prompt }] }
+          ],
+          system_instruction: {
+            parts: [{ text: systemInstruction }]
+          },
+          generationConfig: {
+            response_mime_type: "application/json"
+          }
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message || 'API request failed');
+
+      let responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      
+      try {
+        let jsonCandidate = responseText.trim();
+        const firstBrace = jsonCandidate.indexOf('{');
+        const lastBrace = jsonCandidate.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1) {
+          jsonCandidate = jsonCandidate.substring(firstBrace, lastBrace + 1);
+        }
+
+        let parsed = JSON.parse(jsonCandidate);
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: parsed.reply,
+          edits: parsed.edits || [],
+          newFile: parsed.newFile || null
+        }]);
+      } catch (e) {
+        setMessages(prev => [...prev, { role: 'assistant', content: responseText }]);
+      }
+    } catch (err) {
+      setMessages(prev => [...prev, { role: 'assistant', content: `❌ API Error: ${err.message}` }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="browser-panel">
       <div className="browser-header">
         <div className="browser-header-title">
           <Sparkles size={14} className="browser-icon" />
-          <span>Gemini</span>
+          <span>Gemini AI</span>
         </div>
         <div className="browser-header-actions">
           <button 
-            onClick={() => handleShowLogin()} 
-            className="chat-action-btn" 
-            title="Open Gemini in webview"
+            onClick={() => setShowSettings(!showSettings)} 
+            className={`chat-action-btn ${showSettings ? 'active' : ''}`}
+            title="Settings"
           >
-            <ExternalLink size={14} />
+            <Settings size={14} />
           </button>
           <button onClick={onClose} className="chat-action-btn"><X size={14} /></button>
         </div>
       </div>
+
+      {showSettings && (
+        <div className="chat-settings-overlay" onClick={() => setShowSettings(false)}>
+          <div className="chat-settings-card" onClick={e => e.stopPropagation()}>
+            <div className="chat-settings-header">
+              <h4><Settings size={14} /> Chat Settings</h4>
+              <button className="close-settings-btn" onClick={() => setShowSettings(false)}>
+                <X size={14} />
+              </button>
+            </div>
+            
+            <div className="settings-group">
+              <label><Key size={12} /> Gemini API Key</label>
+              <div className="api-key-input-wrapper">
+                <input 
+                  type="password" 
+                  value={tempApiKey}
+                  onChange={(e) => setTempApiKey(e.target.value)}
+                  placeholder="Paste your API key here..."
+                />
+              </div>
+              <button className="save-api-key-btn" onClick={handleSaveApiKey} disabled={!tempApiKey.trim()}>
+                <Check size={14} />
+                <span>Save API Key</span>
+              </button>
+            </div>
+
+            <div className="settings-divider" />
+
+            <div className="settings-group">
+              <div className="settings-label-row">
+                <label><History size={12} /> Context History</label>
+                <span className="settings-value">{contextLimit} messages</span>
+              </div>
+              <input 
+                type="range" 
+                min="1" 
+                max="50" 
+                value={contextLimit}
+                onChange={(e) => setContextLimit(parseInt(e.target.value))}
+                className="settings-slider"
+              />
+              <p className="settings-hint">Number of previous messages sent to AI</p>
+            </div>
+
+            <div className="settings-divider" />
+
+            <button className="clear-history-btn" onClick={clearHistory}>
+              <Trash2 size={14} />
+              <span>Clear Chat History</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="chat-messages">
         {messages.length === 0 && (
@@ -319,6 +272,30 @@ const BrowserPanel = ({ onClose, activeFile, onApplyEdits }) => {
                     )}
                   </div>
                 )}
+
+                {msg.newFile && (
+                  <div className="apply-edits-container">
+                    {msg.applied ? (
+                      <div className="applied-label">
+                        <Check size={12} />
+                        <span>File created: {msg.newFile.name}</span>
+                      </div>
+                    ) : (
+                      <button 
+                        className="apply-edits-btn" 
+                        onClick={() => {
+                          onCreateFile(msg.newFile.name, msg.newFile.content);
+                          setMessages(prev => prev.map((m, idx) => 
+                            idx === i ? { ...m, applied: true } : m
+                          ));
+                        }}
+                      >
+                        <FilePlus size={14} />
+                        <span>Create {msg.newFile.name}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -335,19 +312,34 @@ const BrowserPanel = ({ onClose, activeFile, onApplyEdits }) => {
       </div>
 
       <div className="chat-input-area">
-        {activeFile && (
-          <div className="context-selector-wrapper">
-            <div 
-              className={`context-chip ${useContext ? 'active' : ''}`}
-              onClick={() => setUseContext(!useContext)}
-              title={useContext ? "Click to exclude file from context" : "Click to include file in context"}
-            >
-              <FileCode size={12} />
-              <span className="context-name">{activeFile.name}</span>
-              {useContext && <Check size={12} className="context-check" />}
+        <div className="input-controls-row">
+          {activeFile && (
+            <div className="context-selector-wrapper">
+              <div 
+                className={`context-chip ${useContext ? 'active' : ''}`}
+                onClick={() => setUseContext(!useContext)}
+                title={useContext ? "Exclude file from context" : "Include file in context"}
+              >
+                <FileCode size={12} />
+                <span className="context-name">{activeFile.name}</span>
+              </div>
             </div>
+          )}
+
+          <div className="model-selector-wrapper">
+            <select 
+              value={selectedModel} 
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="model-select"
+            >
+              {models.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            <ChevronDown size={10} className="select-icon" />
           </div>
-        )}
+        </div>
+
         <div className="chat-input-wrapper">
           <textarea
             value={input}

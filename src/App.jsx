@@ -301,6 +301,27 @@ function App() {
     return parts.slice(0, -1).join('/')
   }
 
+  const handleCreateFile = async (name, content) => {
+    console.log('handleCreateFile triggered:', { name, currentDir });
+    if (!currentDir) {
+      console.warn('Cannot create file: currentDir is empty');
+      return;
+    }
+    
+    try {
+      // Use save_note to create the new file
+      console.log(`Writing file to: ${currentDir}/${name}`);
+      await invoke('save_note', { dir: currentDir, title: name, content });
+      
+      // Refresh the file list
+      const updatedFiles = await invoke('read_dir', { path: currentDir });
+      setFiles(updatedFiles);
+      console.log('File created and sidebar refreshed');
+    } catch (err) {
+      console.error('Failed to create file:', err);
+    }
+  };
+
   const getBreadcrumbs = () => {
     if (!activeFile || !currentDir) return [{ name: getDirName(currentDir), isLast: true }];
     const normalizedRoot = currentDir.replace(/\\/g, '/');
@@ -1082,6 +1103,7 @@ function App() {
                   onClose={() => setBrowserOpen(false)} 
                   activeFile={activeFile ? { name: title, content: content } : null}
                   onApplyEdits={handleApplyEdits}
+                  onCreateFile={handleCreateFile}
                 />
               </motion.div>
             </>
