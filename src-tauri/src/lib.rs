@@ -2,14 +2,21 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::io::{Read, Write};
+use std::collections::HashMap;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize, Child, MasterPty};
 use tauri::{State, Emitter, Manager};
 
-struct TerminalState {
-    master: Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>,
-    writer: Arc<Mutex<Option<Box<dyn Write + Send>>>>,
-    child: Arc<Mutex<Option<Box<dyn Child + Send>>>>,
+struct TerminalInstance {
+    master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    child: Box<dyn Child + Send>,
 }
+
+struct TerminalState {
+    instances: Arc<Mutex<HashMap<String, TerminalInstance>>>,
+}
+
+
 
 
 
@@ -85,22 +92,15 @@ fn create_file(dir: String, name: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn spawn_terminal(state: State<TerminalState>, window: tauri::Window, dir: Option<String>) -> Result<(), String> {
-    println!("Terminal spawn requested for dir: {:?}", dir);
+fn spawn_terminal(state: State<TerminalState>, window: tauri::Window, id: String, dir: Option<String>) -> Result<(), String> {
+    println!("Terminal spawn requested for id: {}, dir: {:?}", id, dir);
     
-    // 1. Cleanup existing state first
+    // 1. Cleanup existing instance if ID reused (unlikely but safe)
     {
-        let mut child_lock = state.child.lock().unwrap();
-        if let Some(mut child) = child_lock.take() {
-            println!("Cleaning up existing terminal process...");
-            let _ = child.kill();
+        let mut instances = state.instances.lock().unwrap();
+        if let Some(mut old) = instances.remove(&id) {
+            let _ = old.child.kill();
         }
-        
-        let mut writer_lock = state.writer.lock().unwrap();
-        *writer_lock = None;
-        
-        let mut master_lock = state.master.lock().unwrap();
-        *master_lock = None;
     }
 
     // 2. Initialize PTY system
@@ -116,59 +116,104 @@ fn spawn_terminal(state: State<TerminalState>, window: tauri::Window, dir: Optio
 
     let shell = if cfg!(target_os = "windows") { "powershell.exe" } else { "bash" };
     let mut cmd = CommandBuilder::new(shell);
+    if cfg!(target_os = "windows") {
+        cmd.args(["-NoLogo", "-NoExit"]);
+    }
     cmd.cwd(cwd);
 
+    // Spawn the child on the slave side, then get reader/writer from master
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    
+    // CRITICAL: On Windows ConPTY, the slave handle MUST be dropped after spawning
+    // but before we start reading. Keeping it alive can cause the second+ PTY
+    // instance to hang or the child process to exit immediately.
+    drop(pair.slave);
+
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
 
-    // 3. Store new state
+    // 3. Store new instance
     {
-        *state.child.lock().unwrap() = Some(child);
-        *state.writer.lock().unwrap() = Some(writer);
-        *state.master.lock().unwrap() = Some(pair.master);
+        let mut instances = state.instances.lock().unwrap();
+        instances.insert(id.clone(), TerminalInstance {
+            master: pair.master,
+            writer,
+            child,
+        });
     }
 
-    // 4. Start reader thread with stability checks
+    // 4. Start reader thread
     let window_clone = window.clone();
+    let id_clone = id.clone();
     std::thread::spawn(move || {
+        // Give the ConPTY/child process a moment to initialize before reading
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        
         let mut reader = reader;
-        let mut buffer = [0u8; 4096]; // Larger buffer for performance
-        while let Ok(n) = reader.read(&mut buffer) {
-            if n == 0 { break; }
-            let data = String::from_utf8_lossy(&buffer[..n]).to_string();
-            // Ignore errors if the window is closed/closing
-            if let Err(_) = window_clone.emit("terminal-output", data) {
-                break;
+        let mut buffer = [0u8; 4096];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    println!("Terminal {}: reader got 0 bytes (EOF), exiting.", id_clone);
+                    break;
+                }
+                Ok(n) => {
+                    let data = String::from_utf8_lossy(&buffer[..n]).to_string();
+                    let event_name = format!("terminal-output-{}", id_clone);
+                    if let Err(e) = window_clone.emit(&event_name, data) {
+                        println!("Terminal {}: emit error: {}, exiting.", id_clone, e);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    println!("Terminal {}: read error: {}, exiting.", id_clone, e);
+                    break;
+                }
             }
         }
-        println!("Terminal reader thread exiting.");
     });
 
-    println!("Terminal spawned successfully.");
+    println!("Terminal {} spawned successfully.", id);
     Ok(())
 }
 
 #[tauri::command]
-fn write_to_terminal(state: State<TerminalState>, data: String) -> Result<(), String> {
-    if let Some(writer) = state.writer.lock().unwrap().as_mut() {
-        writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
-        writer.flush().map_err(|e| e.to_string())?;
+fn write_to_terminal(state: State<TerminalState>, id: String, data: String) -> Result<(), String> {
+    let mut instances = state.instances.lock().unwrap();
+    if let Some(instance) = instances.get_mut(&id) {
+        instance.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+        instance.writer.flush().map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err(format!("Terminal instance {} not found", id))
     }
-    Ok(())
 }
 
 #[tauri::command]
-fn resize_terminal(state: State<TerminalState>, rows: u16, cols: u16) -> Result<(), String> {
-    if let Some(master) = state.master.lock().unwrap().as_ref() {
-        master.resize(PtySize {
+fn resize_terminal(state: State<TerminalState>, id: String, rows: u16, cols: u16) -> Result<(), String> {
+    let instances = state.instances.lock().unwrap();
+    if let Some(instance) = instances.get(&id) {
+        instance.master.resize(PtySize {
             rows,
             cols,
             pixel_width: 0,
             pixel_height: 0,
         }).map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err(format!("Terminal instance {} not found", id))
     }
-    Ok(())
+}
+
+#[tauri::command]
+fn close_terminal(state: State<TerminalState>, id: String) -> Result<(), String> {
+    let mut instances = state.instances.lock().unwrap();
+    if let Some(mut instance) = instances.remove(&id) {
+        let _ = instance.child.kill();
+        Ok(())
+    } else {
+        Err(format!("Terminal instance {} not found", id))
+    }
 }
 
 #[tauri::command]
@@ -387,6 +432,33 @@ async fn send_to_gemini(window: tauri::Window, message: String) -> Result<(), St
     }
     Ok(())
 }
+
+#[tauri::command]
+fn open_in_browser(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn read_gemini_response(window: tauri::Window) -> Result<String, String> {
     use tauri::Manager;
@@ -405,7 +477,7 @@ async fn read_gemini_response(window: tauri::Window) -> Result<String, String> {
                     // Encode response into URL hash
                     try {
                         const payload = btoa(unescape(encodeURIComponent(text.trim())));
-                        window.location.hash = '#CP:' + count + ':' + done + ':' + payload;
+                        window.location.hash = '#KI:' + count + ':' + done + ':' + payload;
                     } catch(e) {}
                 }
             })()
@@ -419,7 +491,7 @@ async fn read_gemini_response(window: tauri::Window) -> Result<String, String> {
         match webview.url() {
             Ok(url) => {
                 let url_str = url.to_string();
-                if let Some(hash_start) = url_str.find("#CP:") {
+                if let Some(hash_start) = url_str.find("#KI:") {
                     let data = &url_str[hash_start + 4..];
                     return Ok(data.to_string());
                 }
@@ -447,10 +519,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(TerminalState {
-            master: Arc::new(Mutex::new(None)),
-            writer: Arc::new(Mutex::new(None)),
-            child: Arc::new(Mutex::new(None)),
+            instances: Arc::new(Mutex::new(HashMap::new())),
         })
         .invoke_handler(tauri::generate_handler![
             save_note, 
@@ -465,6 +536,7 @@ pub fn run() {
             spawn_terminal,
             write_to_terminal,
             resize_terminal,
+            close_terminal,
             minimize_window,
             toggle_maximize,
             close_window,
@@ -475,17 +547,18 @@ pub fn run() {
             resize_browser,
             eval_browser,
             send_to_gemini,
-            read_gemini_response
+            read_gemini_response,
+            open_in_browser
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
                 let state = app_handle.state::<TerminalState>();
-                let mut child_lock = state.child.lock().unwrap();
-                if let Some(mut child) = child_lock.take() {
+                let mut instances = state.instances.lock().unwrap();
+                for (_, mut instance) in instances.drain() {
                     println!("App exiting: Killing terminal process...");
-                    let _ = child.kill();
+                    let _ = instance.child.kill();
                 }
             }
         });

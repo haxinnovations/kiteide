@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { FileText, Plus, Trash2, Save, Sidebar as SidebarIcon, RefreshCw, Folder, Edit3, FolderOpen, FolderPlus, Terminal as TerminalIcon, X, ChevronRight, ChevronDown, Minus, Square, MessagesSquare, Sparkles, RotateCcw, RotateCw, Image, Code2, Globe, Palette, Braces, Settings, FileCode, Scissors, Copy, CopyPlus, Link, MapPin, ClipboardPaste, Check } from 'lucide-react'
+import { FileText, Plus, Trash2, Save, Sidebar as SidebarIcon, RefreshCw, Folder, Edit3, FolderOpen, FolderPlus, Terminal as TerminalIcon, X, ChevronRight, ChevronDown, Minus, Square, MessagesSquare, Sparkles, RotateCcw, RotateCw, Image, Code2, Globe, Palette, Braces, Settings, FileCode, Scissors, Copy, CopyPlus, Link, MapPin, ClipboardPaste, Check, MoreVertical } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { emit, listen } from '@tauri-apps/api/event'
@@ -140,7 +140,7 @@ const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFil
 
 function App() {
   const [currentDir, setCurrentDir] = useState(() => {
-    const saved = localStorage.getItem('codepad-dir')
+    const saved = localStorage.getItem('kite-dir')
     return (saved === 'null' || saved === 'undefined') ? null : saved
   })
   const [files, setFiles] = useState([])
@@ -151,11 +151,14 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [browserOpen, setBrowserOpen] = useState(false)
   const [terminalOpen, setTerminalOpen] = useState(false)
+  const [terminals, setTerminals] = useState([{ id: 'default', title: 'powershell' }])
+  const [activeTerminalId, setActiveTerminalId] = useState('default')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(false)
   const [menu, setMenu] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [clipboard, setClipboard] = useState(null) // { path, type, name }
+  const [terminalMenu, setTerminalMenu] = useState(null); // { id, x, y }
 
   const isResizingSidebar = useRef(false)
   const isResizingTerminal = useRef(false)
@@ -178,14 +181,19 @@ function App() {
 
   // Keyboard Shortcuts
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        handleSave();
+    const handleGlobalKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 's') {
+          e.preventDefault();
+          handleSave();
+        } else if (e.key === 'o') {
+          e.preventDefault();
+          handleOpenFolder();
+        }
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [content, activeFile]); // Dependencies ensure we have latest content/file
 
   const fetchFiles = async (dir = currentDir) => {
@@ -209,9 +217,9 @@ function App() {
 
   // Initialize CSS Variables from localStorage or defaults
   useEffect(() => {
-    const savedSidebarWidth = localStorage.getItem('codepad-sidebar-width') || '260px';
-    const savedTerminalHeight = localStorage.getItem('codepad-terminal-height') || '250px';
-    const savedChatWidth = localStorage.getItem('codepad-chat-width') || '300px';
+    const savedSidebarWidth = localStorage.getItem('kite-sidebar-width') || '260px';
+    const savedTerminalHeight = localStorage.getItem('kite-terminal-height') || '250px';
+    const savedChatWidth = localStorage.getItem('kite-chat-width') || '300px';
     document.documentElement.style.setProperty('--sidebar-width', savedSidebarWidth);
     document.documentElement.style.setProperty('--terminal-height', savedTerminalHeight);
     document.documentElement.style.setProperty('--chat-width', savedChatWidth);
@@ -220,13 +228,21 @@ function App() {
   useEffect(() => {
     if (currentDir && currentDir !== 'null') {
       fetchFiles()
-      localStorage.setItem('codepad-dir', currentDir)
+      localStorage.setItem('kite-dir', currentDir)
     }
-    const handleClick = () => {
-      setMenu(null)
-      setContextMenu(null)
+    // Global click-away listener for all menus
+    const handleGlobalMouseDown = (e) => {
+      // If we clicked something that isn't a menu or a menu trigger, close all menus
+      if (!e.target.closest('.terminal-tab-menu') && 
+          !e.target.closest('.tab-options-btn') && 
+          !e.target.closest('.context-menu') &&
+          !e.target.closest('.dropdown-menu')) {
+        setMenu(null)
+        setContextMenu(null)
+        setTerminalMenu(null)
+      }
     }
-    window.addEventListener('click', handleClick)
+    window.addEventListener('mousedown', handleGlobalMouseDown)
 
     // Optimized High-Performance Resizing
     const handleMouseMove = (e) => {
@@ -246,13 +262,13 @@ function App() {
 
     const handleMouseUp = () => {
       if (isResizingSidebar.current) {
-        localStorage.setItem('codepad-sidebar-width', document.documentElement.style.getPropertyValue('--sidebar-width'));
+        localStorage.setItem('kite-sidebar-width', document.documentElement.style.getPropertyValue('--sidebar-width'));
       }
       if (isResizingTerminal.current) {
-        localStorage.setItem('codepad-terminal-height', document.documentElement.style.getPropertyValue('--terminal-height'));
+        localStorage.setItem('kite-terminal-height', document.documentElement.style.getPropertyValue('--terminal-height'));
       }
       if (isResizingChat.current) {
-        localStorage.setItem('codepad-chat-width', document.documentElement.style.getPropertyValue('--chat-width'));
+        localStorage.setItem('kite-chat-width', document.documentElement.style.getPropertyValue('--chat-width'));
       }
       isResizingSidebar.current = false;
       isResizingTerminal.current = false;
@@ -264,7 +280,7 @@ function App() {
     window.addEventListener('mouseup', handleMouseUp)
 
     return () => {
-      window.removeEventListener('click', handleClick)
+      window.removeEventListener('mousedown', handleGlobalMouseDown)
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
@@ -277,7 +293,7 @@ function App() {
       if (selected && typeof selected === 'string') {
         setCurrentDir(selected)
         setSelectedPath(selected)
-        localStorage.setItem('codepad-dir', selected)
+        localStorage.setItem('kite-dir', selected)
         setActiveFile(null)
         setTitle('')
         setContent('')
@@ -339,50 +355,69 @@ function App() {
     return crumbs;
   };
 
-  const handleApplyEdits = (edits) => {
+  const handleApplyEdits = async (edits) => {
     console.log('Apply edits triggered:', edits);
-    if (!activeFile || !edits || !Array.isArray(edits)) {
-      console.warn('Apply edits ignored: activeFile or edits missing');
+    if (!edits || !Array.isArray(edits)) {
+      console.warn('Apply edits ignored: edits missing');
       return;
     }
     
-    // Sort edits in reverse order to apply them without shifting subsequent line numbers
-    const sortedEdits = [...edits].sort((a, b) => b.startLine - a.startLine);
-    
-    let lines = content.split('\n');
-    let hasChanged = false;
+    // Group edits by file
+    const editsByFile = edits.reduce((acc, edit) => {
+      // Use edit.file if provided, otherwise fallback to activeFile path
+      const filePath = edit.file ? (currentDir + '/' + edit.file.replace(/\\/g, '/').replace(/^\//, '')) : activeFile;
+      if (!filePath) return acc;
+      if (!acc[filePath]) acc[filePath] = [];
+      acc[filePath].push(edit);
+      return acc;
+    }, {});
 
-    for (const edit of sortedEdits) {
-      // AI returns 1-indexed line numbers
-      const startIdx = edit.startLine - 1;
-      const endIdx = edit.endLine - 1;
-      
-      console.log(`Applying edit: lines ${startIdx + 1}-${endIdx + 1}`);
+    for (const [filePath, fileEdits] of Object.entries(editsByFile)) {
+      try {
+        let fileLines = [];
+        let isCurrentFile = filePath === activeFile;
 
-      if (startIdx >= 0 && startIdx <= lines.length) {
-        // Replacement might be multiple lines
-        const replacementLines = edit.replacement.split('\n');
+        if (isCurrentFile) {
+          fileLines = content.split('\n');
+        } else {
+          // Read from disk
+          const lastSlash = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+          const parent = lastSlash !== -1 ? filePath.substring(0, lastSlash) : '.';
+          const filename = lastSlash !== -1 ? filePath.substring(lastSlash + 1) : filePath;
+          const diskContent = await invoke('read_file', { dir: parent, name: filename });
+          fileLines = diskContent.split('\n');
+        }
+
+        // Sort edits in reverse order for this file
+        const sortedEdits = [...fileEdits].sort((a, b) => b.startLine - a.startLine);
         
-        // Remove old lines and insert new ones
-        const deleteCount = Math.max(0, (endIdx - startIdx) + 1);
-        lines.splice(startIdx, deleteCount, ...replacementLines);
-        hasChanged = true;
+        for (const edit of sortedEdits) {
+          const startIdx = edit.startLine - 1;
+          const endIdx = edit.endLine - 1;
+          if (startIdx >= 0 && startIdx <= fileLines.length) {
+            const replacementLines = edit.replacement.split('\n');
+            const deleteCount = Math.max(0, (endIdx - startIdx) + 1);
+            fileLines.splice(startIdx, deleteCount, ...replacementLines);
+          }
+        }
+
+        const updatedContent = fileLines.join('\n');
+        
+        // Save to disk
+        const lastSlash = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+        const parent = lastSlash !== -1 ? filePath.substring(0, lastSlash) : '.';
+        const filename = lastSlash !== -1 ? filePath.substring(lastSlash + 1) : filePath;
+        await invoke('save_note', { dir: parent, title: filename, content: updatedContent });
+        
+        // If it's the current file, update editor state too
+        if (isCurrentFile) {
+          setContent(updatedContent);
+        }
+        
+        console.log(`Successfully applied edits to ${filePath}`);
+      } catch (err) {
+        console.error(`Failed to apply edits to ${filePath}:`, err);
       }
-    }
-    
-    if (hasChanged) {
-      const updated = lines.join('\n');
-      console.log('Content updated, saving to:', activeFile);
-      setContent(updated);
-      
-      // Save to disk - handle both Windows (\) and Unix (/) slashes
-      const lastSlash = Math.max(activeFile.lastIndexOf('/'), activeFile.lastIndexOf('\\'));
-      const parent = lastSlash !== -1 ? activeFile.substring(0, lastSlash) : '.';
-      const filename = lastSlash !== -1 ? activeFile.substring(lastSlash + 1) : activeFile;
-      
-      invoke('save_note', { dir: parent, title: filename, content: updated })
-        .then(() => console.log('File saved successfully'))
-        .catch(err => console.error('Failed to save auto-edit:', err));
     }
   };
 
@@ -509,6 +544,35 @@ function App() {
       alert('Failed to create folder: ' + error)
     }
   }
+
+  const addTerminal = () => {
+    const newId = `term-${Date.now()}`;
+    setTerminals([...terminals, { id: newId, title: 'powershell' }]);
+    setActiveTerminalId(newId);
+    setTerminalOpen(true);
+  };
+
+  const removeTerminal = (e, idToRemove) => {
+    if (e) e.stopPropagation();
+    const newTerminals = terminals.filter(t => t.id !== idToRemove);
+    setTerminals(newTerminals);
+    
+    if (newTerminals.length === 0) {
+      setTerminalOpen(false);
+    } else if (activeTerminalId === idToRemove) {
+      setActiveTerminalId(newTerminals[newTerminals.length - 1].id);
+    }
+    setTerminalMenu(null);
+  };
+
+  const renameTerminal = (id) => {
+    const term = terminals.find(t => t.id === id);
+    const newName = prompt('Enter new terminal name:', term.title);
+    if (newName && newName.trim()) {
+      setTerminals(terminals.map(t => t.id === id ? { ...t, title: newName } : t));
+    }
+    setTerminalMenu(null);
+  };
 
   const handleSave = async () => {
     if (!activeFile) return
@@ -783,7 +847,7 @@ function App() {
       {/* Premium Custom Title Bar */}
       <div className="custom-title-bar" onMouseDown={handleDrag}>
         <div className="title-bar-left">
-          <div className="app-icon-small">CP</div>
+
           <div className="title-bar-menu">
             <div className="menu-container">
               <button 
@@ -905,7 +969,8 @@ function App() {
         </div>
         
         <div className="title-bar-center">
-          <span className="window-title">{title || 'CodePad'}</span>
+          <img src="/kiteicon.png" alt="" className="title-bar-logo" />
+          <span className="window-title">{title || 'Kite IDE'}</span>
         </div>
 
         <div className="title-bar-right">
@@ -1007,7 +1072,13 @@ function App() {
                 </button>
               )}
               <button 
-                onClick={() => setTerminalOpen(!terminalOpen)}
+                onClick={() => {
+                  if (!terminalOpen && terminals.length === 0) {
+                    addTerminal();
+                  } else {
+                    setTerminalOpen(!terminalOpen);
+                  }
+                }}
                 className={`icon-toggle ${terminalOpen ? 'active' : ''}`}
                 title="Toggle Terminal"
               >
@@ -1053,8 +1124,8 @@ function App() {
               ) : (
                 <div className="editor-placeholder">
                   <div className="placeholder-content">
-                    <div className="placeholder-logo">CP</div>
-                    <h1>Welcome to CodePad</h1>
+                    <img src="/kiteicon.png" alt="Kite Logo" className="placeholder-logo-img" />
+                    <h1>Welcome to Kite IDE</h1>
                     <p>Select a file from the sidebar or create a new one to get started.</p>
                     {!currentDir && (
                       <button onClick={handleOpenFolder} className="btn-primary">
@@ -1076,13 +1147,77 @@ function App() {
                 style={{ overflow: 'hidden' }}
               >
                 <div className="terminal-header">
-                  <span>Terminal</span>
-                  <button onClick={() => setTerminalOpen(false)} className="btn-icon">
-                    <X size={14} />
-                  </button>
+                  <div className="terminal-tabs">
+                    {terminals.map((term) => (
+                      <div 
+                        key={term.id} 
+                        className={`terminal-tab ${activeTerminalId === term.id ? 'active' : ''}`}
+                        onClick={() => setActiveTerminalId(term.id)}
+                      >
+                        <TerminalIcon size={12} />
+                        <span>{term.title}</span>
+                        <button 
+                          className="tab-options-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setTerminalMenu({ id: term.id, x: rect.left, y: rect.bottom });
+                          }}
+                        >
+                          <MoreVertical size={12} />
+                        </button>
+                      </div>
+                    ))}
+                    <button className="add-terminal-btn" onClick={addTerminal}>
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                  <div className="terminal-actions">
+                    <button onClick={() => setTerminalOpen(false)} className="terminal-close-btn">
+                      <X size={14} />
+                    </button>
+                  </div>
                 </div>
                 <div className="terminal-body">
-                  <Terminal currentDir={currentDir} />
+                  {terminalMenu && (
+                    <>
+                      <div 
+                        className="menu-backdrop" 
+                        onMouseDown={() => setTerminalMenu(null)}
+                        onContextMenu={(e) => { e.preventDefault(); setTerminalMenu(null); }}
+                      />
+                      <div 
+                        className="terminal-tab-menu"
+                        style={{ position: 'fixed', top: terminalMenu.y + 5, left: terminalMenu.x, zIndex: 1000 }}
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        <button onClick={() => renameTerminal(terminalMenu.id)}>
+                          <Edit3 size={14} />
+                          Rename
+                        </button>
+                        <button 
+                          onClick={() => removeTerminal(null, terminalMenu.id)}
+                          className="delete"
+                        >
+                          <Trash2 size={14} />
+                          Kill Terminal
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {terminals.map((term) => (
+                    <div 
+                      key={term.id} 
+                      style={{ 
+                        display: activeTerminalId === term.id ? 'block' : 'none',
+                        width: '100%',
+                        height: '100%'
+                      }}
+                    >
+                      <Terminal currentDir={currentDir} id={term.id} />
+                    </div>
+                  ))}
                 </div>
               </motion.div>
             </div>
@@ -1143,6 +1278,19 @@ function App() {
             Copy Relative Path
           </button>
           <div className="menu-divider" />
+          {(contextMenu.fileName.toLowerCase().endsWith('.html') || contextMenu.fileName.toLowerCase().endsWith('.htm')) && (
+            <button onClick={async () => {
+              try {
+                await invoke('open_in_browser', { path: contextMenu.fullPath });
+                setContextMenu(null);
+              } catch (err) {
+                console.error('Failed to open with browser:', err);
+              }
+            }}>
+              <Globe size={14} />
+              Open with web browser
+            </button>
+          )}
           <button onClick={handleRename}>
             <Edit3 size={14} />
             Rename

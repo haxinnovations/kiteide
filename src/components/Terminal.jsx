@@ -1,18 +1,20 @@
 import { useEffect, useRef } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
 import '@xterm/xterm/css/xterm.css';
 
-const Terminal = ({ currentDir }) => {
+const Terminal = ({ currentDir, id }) => {
   const terminalRef = useRef(null);
   const xtermRef = useRef(null);
   const fitAddonRef = useRef(null);
-  const hasSpawned = useRef(false); // Prevents double spawning
+  const hasSpawned = useRef(false);
 
   useEffect(() => {
-    if (!terminalRef.current || hasSpawned.current) return;
+    if (!terminalRef.current || hasSpawned.current || !id) return;
     hasSpawned.current = true;
 
     // Initialize xterm
@@ -47,6 +49,9 @@ const Terminal = ({ currentDir }) => {
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon((event, url) => {
+      openUrl(url).catch(err => console.error('Failed to open link:', err));
+    }));
     term.open(terminalRef.current);
     
     xtermRef.current = term;
@@ -57,20 +62,25 @@ const Terminal = ({ currentDir }) => {
       fitAddon.fit();
     }, 100);
 
-    // Spawn backend terminal
-    console.log('Requesting terminal spawn for:', currentDir);
-    invoke('spawn_terminal', { dir: currentDir }).catch(err => {
+    // Spawn backend terminal with ID
+    console.log(`Requesting terminal spawn for ${id} in:`, currentDir);
+    invoke('spawn_terminal', { id, dir: currentDir }).catch(err => {
       console.error('Spawn Error:', err);
       term.write('\r\n\x1b[31mError spawning terminal: ' + err + '\x1b[0m\r\n');
     });
 
-    // Resize handling using ResizeObserver
+    // Resize handling with initialization delay
+    const initTime = Date.now();
     const resizeObserver = new ResizeObserver(() => {
-      if (fitAddonRef.current) {
+      // Don't resize for the first 500ms to allow shell to stabilize
+      if (Date.now() - initTime < 500) return;
+
+      if (fitAddonRef.current && terminalRef.current && terminalRef.current.offsetWidth > 0) {
         fitAddonRef.current.fit();
         const dims = fitAddonRef.current.proposeDimensions();
-        if (dims) {
-          invoke('resize_terminal', { rows: dims.rows, cols: dims.cols })
+        if (dims && dims.rows > 0 && dims.cols > 0) {
+          console.log(`Resizing terminal ${id} to:`, dims);
+          invoke('resize_terminal', { id, rows: dims.rows, cols: dims.cols })
             .catch(err => console.error('Resize Error:', err));
         }
       }
@@ -78,14 +88,14 @@ const Terminal = ({ currentDir }) => {
 
     resizeObserver.observe(terminalRef.current);
 
-    // Listen for backend output
-    const unlistenPromise = listen('terminal-output', (event) => {
+    // Listen for unique backend output for this ID
+    const unlistenPromise = listen(`terminal-output-${id}`, (event) => {
       term.write(event.payload);
     });
 
-    // Handle user input
+    // Handle user input with ID
     term.onData((data) => {
-      invoke('write_to_terminal', { data }).catch(err => console.error(err));
+      invoke('write_to_terminal', { id, data }).catch(err => console.error(err));
     });
 
     return () => {
@@ -93,8 +103,10 @@ const Terminal = ({ currentDir }) => {
       resizeObserver.disconnect();
       term.dispose();
       hasSpawned.current = false;
+      // Tell backend to close this specific terminal
+      invoke('close_terminal', { id }).catch(e => console.error('Close error:', e));
     };
-  }, []);
+  }, [id]);
 
   return (
     <div 
