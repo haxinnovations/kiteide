@@ -1,16 +1,64 @@
-# React + Vite
+# KiteIDE
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**KiteIDE** is a modern, high-performance desktop code editor and integrated development environment built with **Tauri**, **React**, and **Rust**. It aims to provide a lightweight yet powerful experience for developers who value speed and aesthetics.
 
-Currently, two official plugins are available:
+## ✨ Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **🚀 Lightning Fast**: Powered by Tauri and Rust for a minimal resource footprint.
+- **💻 Integrated Terminal**: Full-featured terminal powered by `xterm.js`.
+- **🌐 Browser Panel**: Built-in browser for live previews and documentation.
+- **🎨 Premium UI**: Beautiful, responsive interface built with Framer Motion and Lucide icons.
+- **📝 Syntax Highlighting**: Robust language support via PrismJS.
+- **📂 File Management**: Intuitive project navigation and file handling.
 
-## React Compiler
+## 🛠️ Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Core**: [Tauri](https://tauri.app/) (Rust)
+- **Frontend**: [React](https://react.dev/) + [Vite](https://vitejs.dev/)
+- **Styling**: Vanilla CSS
+- **Animations**: [Framer Motion](https://www.framer.com/motion/)
+- **Terminal**: [xterm.js](https://xtermjs.org/)
+- **Icons**: [Lucide React](https://lucide.dev/)
 
-## Expanding the ESLint configuration
+## 🚀 Getting Started
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) (latest LTS)
+- [Rust](https://www.rust-lang.org/) (latest stable)
+- [Tauri Prerequisites](https://tauri.app/v1/guides/getting-started/prerequisites)
+
+### Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/haxinnovations/kiteide.git
+   cd kiteide
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+### Development
+
+Run the development server with Tauri:
+```bash
+npm run tauri dev
+```
+
+### Build
+
+To create a production build:
+```bash
+npm run tauri build
+```
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+Built with ❤️ by [Hax Innovations](https://github.com/haxinnovations)
