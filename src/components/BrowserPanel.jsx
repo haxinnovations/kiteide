@@ -213,11 +213,8 @@ PROJECT ENVIRONMENT:
 - Active Directory: ${projectDir || 'Not specified'}
 - DIRECTORY CREATION: If you want to create a file in a directory that does not exist, you MUST first create that folder using a terminal command (e.g., "mkdir -p src/components").
 - FILE EXISTENCE: Before creating a new file, you MUST check if it already exists using 'listFiles' if the directory context is not already present in the chat.
-- TASK ORDER: Always work on tasks in sequential order. Do not skip ahead.
 CRITICAL: All code content in 'replacement', 'content', or 'commands' MUST be properly JSON-escaped. Especially double quotes must be escaped as \\".
 - For edits: include an 'edits' array with {'startLine', 'endLine', 'replacement'}. 
-- For tasks: include a 'tasks' array with {'id', 'title', 'completed', 'order'}. Use this for the project roadmap.
-- When a task is done: set 'taskCompleted' to that task's ID or Title.
 - For new files: include a 'newFile' object with {'name', 'content'}. 
 For terminal commands: include a 'commands' array of strings.
 Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": null, "readFile": null, "commands": []}`;
@@ -274,9 +271,9 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
           raw: jsonCandidate
         };
 
-        // 1. Unified Task (Roadmap) Management
+        // 1. Unified Task (Roadmap) Management - Only in Agent Mode
         let updatedTasks = [...tasks];
-        if (assistantMessage.tasks.length > 0 || assistantMessage.taskCompleted) {
+        if (mode === 'agent' && (assistantMessage.tasks.length > 0 || assistantMessage.taskCompleted)) {
           // Calculate the new state locally for immediate tool use
           let newTasks = [...tasks];
           if (assistantMessage.tasks.length > 0) {
@@ -492,7 +489,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
   return (
     <div className="flex flex-col h-full bg-bg-primary relative overflow-hidden border-l border-border">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-bg-primary h-[38px] flex-shrink-0">
+      <div className="flex items-center justify-between px-3 border-b border-border bg-bg-primary h-10 flex-shrink-0">
         <div className="flex items-center gap-2 text-text-primary font-semibold text-xs">
           <Sparkles size={14} className="text-accent" />
           <span>Gemini Assistant</span>
@@ -634,7 +631,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-0 scroll-smooth custom-scrollbar">
+      <div className="flex-1 overflow-y-auto space-y-0 scroll-smooth custom-scrollbar cursor-default">
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center opacity-30 py-12 px-6">
             <Sparkles size={48} className="mb-4 text-accent animate-pulse" />
@@ -645,7 +642,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
         {messages.map((msg, i) => (
           <div key={i} className={`group py-4 px-6 ${msg.role === 'user' ? 'bg-bg-secondary/40 border-y border-border/10' : ''} animate-in fade-in slide-in-from-bottom-1 duration-300`}>
             <div className="max-w-3xl mx-auto">
-              <div className="prose prose-sm max-w-none text-[13.5px] leading-relaxed text-text-primary prose-p:my-1 prose-pre:bg-bg-secondary prose-pre:text-text-primary prose-code:text-accent relative">
+              <div className="prose prose-sm max-w-none text-[13.5px] leading-relaxed text-text-primary prose-p:my-1 prose-pre:bg-bg-secondary prose-pre:text-text-primary prose-code:text-accent relative cursor-text">
                 {msg.isToolOutput && (msg.viewedFiles?.length > 0 || msg.viewedDirs?.length > 0) ? (
                   <div className="space-y-3">
                     <div className="flex flex-wrap gap-2">
@@ -839,7 +836,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
       </div>
 
       {/* Input Area */}
-      <div className="px-6 pb-6 pt-4 border-t border-border/10 bg-bg-primary">
+      <div className="px-6 pb-6 pt-4 border-t-2 border-border/20 bg-bg-primary">
         <div className="max-w-3xl mx-auto space-y-3">
           {/* Header Controls */}
           <div className="flex items-center justify-between px-0 h-6">
@@ -885,7 +882,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               placeholder={mode === 'agent' ? "How can I help you build today?" : "Ask Gemini anything..."}
-              className="w-full bg-transparent px-0 py-5 pr-12 text-[14px] leading-relaxed focus:outline-none resize-none min-h-[100px] max-h-[400px] placeholder:text-text-secondary/30 text-text-primary custom-scrollbar"
+              className="w-full bg-transparent px-0 py-5 pr-12 text-[14px] leading-relaxed focus:outline-none resize-none min-h-[100px] max-h-[400px] placeholder:text-text-secondary/30 text-text-primary custom-scrollbar cursor-text"
               rows={1}
               disabled={loading}
             />

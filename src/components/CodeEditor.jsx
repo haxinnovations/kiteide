@@ -5,14 +5,9 @@ const CodeEditor = ({ content, setContent, activeFile }) => {
   const editorRef = useRef(null);
 
   const handleEditorScroll = (e) => {
-    const { scrollTop, scrollLeft } = e.target;
+    const { scrollTop } = e.target;
     if (lineNumbersRef.current) {
       lineNumbersRef.current.scrollTop = scrollTop;
-    }
-    const highlightLayer = e.target.parentElement.querySelector('.highlight-layer');
-    if (highlightLayer) {
-      highlightLayer.scrollTop = scrollTop;
-      highlightLayer.scrollLeft = scrollLeft;
     }
   };
 
@@ -207,22 +202,26 @@ const CodeEditor = ({ content, setContent, activeFile }) => {
           <div key={i + 1} className="text-[11px] leading-6 font-mono text-text-secondary/30 h-6">{i + 1}</div>
         ))}
       </div>
-      <div className="flex-1 relative bg-bg-primary overflow-hidden">
-        <div 
-          className="absolute inset-0 p-4 font-mono text-[13px] leading-6 whitespace-pre pointer-events-none overflow-hidden highlight-layer"
-          dangerouslySetInnerHTML={{ __html: highlightContent(content) + '\n' }}
-        />
-        <textarea
-          ref={editorRef}
-          className="absolute inset-0 w-full h-full p-4 bg-transparent text-transparent caret-accent font-mono text-[13px] leading-6 resize-none outline-none overflow-auto custom-scrollbar"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onScroll={handleEditorScroll}
-          placeholder="Start typing..."
-          spellCheck="false"
-          wrap="off"
-        />
+      <div 
+        className="flex-1 relative bg-bg-primary overflow-auto custom-scrollbar cursor-default"
+        onScroll={handleEditorScroll}
+      >
+        <div className="relative min-h-full min-w-full inline-block">
+          <div 
+            className="p-4 font-mono text-[13px] leading-6 whitespace-pre pointer-events-none highlight-layer"
+            dangerouslySetInnerHTML={{ __html: highlightContent(content) + '\n' }}
+          />
+          <textarea
+            ref={editorRef}
+            className="absolute inset-0 w-full h-full p-4 bg-transparent text-transparent caret-accent font-mono text-[13px] leading-6 resize-none outline-none overflow-hidden cursor-text"
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Start typing..."
+            spellCheck="false"
+            wrap="off"
+          />
+        </div>
       </div>
     </div>
   );

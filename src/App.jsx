@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Globe, Plus, Trash2, Save, Sidebar as SidebarIcon, RefreshCw, Edit3, FolderOpen, FolderPlus, Terminal as TerminalIcon, X, Minus, Square, Sparkles, RotateCcw, RotateCw, Scissors, Copy, CopyPlus, Link, MapPin, ClipboardPaste, Check, MoreVertical, Palette } from 'lucide-react'
+import { Globe, Plus, Trash2, Save, Sidebar as SidebarIcon, RefreshCw, Edit3, FolderOpen, FolderPlus, Terminal as TerminalIcon, X, Minus, Square, Sparkles, RotateCcw, RotateCw, Scissors, Copy, CopyPlus, Link, MapPin, ClipboardPaste, Check, MoreVertical, Palette, Code2, FileText, Braces, Image, Settings } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { emit } from '@tauri-apps/api/event'
@@ -12,6 +12,19 @@ import FileTreeItem from './components/FileTreeItem'
 
 const appWindow = getCurrentWindow();
 
+const getDirName = (path) => {
+  if (!path) return ''
+  const parts = path.split(/[/\\]/)
+  return parts[parts.length - 1] || path
+}
+
+const getParentDir = (path) => {
+  if (!path) return ''
+  const parts = path.split(/[/\\]/)
+  if (parts.length <= 1) return ''
+  return parts.slice(0, -1).join('/')
+}
+
 function App() {
   const [currentDir, setCurrentDir] = useState(() => {
     const saved = localStorage.getItem('kite-dir')
@@ -19,14 +32,41 @@ function App() {
     return saved.replace(/\\/g, '/')
   })
 
+  const getFileIcon = (filename) => {
+    const ext = filename.split('.').pop().toLowerCase();
+    const icons = {
+      js: { icon: <Code2 size={14} />, color: 'text-yellow-500' },
+      jsx: { icon: <Code2 size={14} />, color: 'text-blue-400' },
+      ts: { icon: <Code2 size={14} />, color: 'text-blue-600' },
+      tsx: { icon: <Code2 size={14} />, color: 'text-blue-500' },
+      css: { icon: <Palette size={14} />, color: 'text-blue-500' },
+      scss: { icon: <Palette size={14} />, color: 'text-pink-500' },
+      html: { icon: <Globe size={14} />, color: 'text-orange-500' },
+      json: { icon: <Braces size={14} />, color: 'text-yellow-600' },
+      md: { icon: <FileText size={14} />, color: 'text-text-secondary' },
+      png: { icon: <Image size={14} />, color: 'text-purple-500' },
+      jpg: { icon: <Image size={14} />, color: 'text-purple-500' },
+      svg: { icon: <Image size={14} />, color: 'text-orange-400' },
+      toml: { icon: <Settings size={14} />, color: 'text-text-secondary' },
+      yaml: { icon: <Settings size={14} />, color: 'text-text-secondary' },
+    };
+    const iconData = icons[ext] || { icon: <FileText size={14} />, color: 'text-text-secondary' };
+    return (
+      <span className={`${iconData.color} shrink-0 opacity-80 group-hover:opacity-100 transition-opacity`}>
+        {iconData.icon}
+      </span>
+    );
+  };
+
   const [activeFile, setActiveFile] = useState(null)
+  const [openFiles, setOpenFiles] = useState([]) // { path, name, content, isDirty }
   const [selectedPath, setSelectedPath] = useState(null)
   const [content, setContent] = useState('')
   const [title, setTitle] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [browserOpen, setBrowserOpen] = useState(false)
   const [terminalOpen, setTerminalOpen] = useState(false)
-  const [terminals, setTerminals] = useState([{ id: 'default', title: 'powershell' }])
+  const [terminals, setTerminals] = useState([{ id: 'default', title: 'terminal' }])
   const [activeTerminalId, setActiveTerminalId] = useState('default')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -134,6 +174,53 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDir])
 
+  const performDelete = async (fullPath) => {
+    if (!fullPath) return;
+    const fileName = getDirName(fullPath);
+    const parentPath = getParentDir(fullPath);
+
+    if (!confirm(`Delete ${fileName}?`)) return
+    try {
+      await invoke('delete_file', { dir: parentPath, name: fileName })
+      setOpenFiles(prev => prev.filter(f => f.path !== fullPath));
+      if (activeFile === fullPath) {
+        setActiveFile(null)
+        setTitle('')
+        setContent('')
+      }
+      await fetchFiles()
+      emit('refresh-files')
+    } catch (error) {
+      alert('Delete failed: ' + error)
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!contextMenu?.fullPath) return
+    await performDelete(contextMenu.fullPath);
+    setContextMenu(null)
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Delete') {
+        // Don't delete if we're typing in an input or the editor
+        if (document.activeElement.tagName === 'INPUT' || 
+            document.activeElement.tagName === 'TEXTAREA' ||
+            document.activeElement.isContentEditable) {
+          return;
+        }
+
+        if (selectedPath) {
+          performDelete(selectedPath);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedPath]);
+
   const handleOpenFolder = async () => {
     setMenu(null);
     try {
@@ -152,18 +239,6 @@ function App() {
     }
   }
 
-  const getDirName = (path) => {
-    if (!path) return ''
-    const parts = path.split(/[/\\]/)
-    return parts[parts.length - 1] || path
-  }
-
-  const getParentDir = (path) => {
-    if (!path) return ''
-    const parts = path.split(/[/\\]/)
-    if (parts.length <= 1) return ''
-    return parts.slice(0, -1).join('/')
-  }
 
   const handleCreateFile = async (name, content) => {
     console.log('handleCreateFile triggered:', { name, currentDir });
@@ -258,7 +333,7 @@ function App() {
         
         // If it's the current file, update editor state too
         if (isCurrentFile) {
-          setContent(updatedContent);
+          handleContentChange(updatedContent);
         }
         
         console.log(`Successfully applied edits to ${filePath}`);
@@ -270,10 +345,22 @@ function App() {
 
   const handleFileClick = async (file, parentPath) => {
     if (file.is_dir) return
-    const fullPath = `${parentPath}/${file.name}`;
+    const fullPath = `${parentPath}/${file.name}`.replace(/\\/g, '/');
     setSelectedPath(fullPath);
+
+    // If already open, just switch to it
+    const existing = openFiles.find(f => f.path === fullPath);
+    if (existing) {
+      setActiveFile(fullPath);
+      setTitle(existing.name);
+      setContent(existing.content);
+      return;
+    }
+
     try {
       const fileContent = await invoke('read_file', { dir: parentPath, name: file.name })
+      const newFile = { path: fullPath, name: file.name, content: fileContent, isDirty: false };
+      setOpenFiles([...openFiles, newFile]);
       setActiveFile(fullPath)
       setTitle(file.name)
       setContent(fileContent)
@@ -281,6 +368,42 @@ function App() {
       console.error('Failed to read file:', error)
     }
   }
+
+  const closeFile = (e, pathToRemove) => {
+    if (e) e.stopPropagation();
+    
+    const fileToRemove = openFiles.find(f => f.path === pathToRemove);
+    if (fileToRemove?.isDirty) {
+      if (!confirm(`Discard unsaved changes in ${fileToRemove.name}?`)) return;
+    }
+
+    const newOpenFiles = openFiles.filter(f => f.path !== pathToRemove);
+    setOpenFiles(newOpenFiles);
+    
+    if (activeFile === pathToRemove) {
+      if (newOpenFiles.length > 0) {
+        const nextFile = newOpenFiles[newOpenFiles.length - 1];
+        setActiveFile(nextFile.path);
+        setTitle(nextFile.name);
+        setContent(nextFile.content);
+      } else {
+        setActiveFile(null);
+        setTitle('');
+        setContent('');
+      }
+    }
+  };
+
+  // Unified content change handler to avoid cascading renders
+  const handleContentChange = (newContent) => {
+    setContent(newContent);
+    setOpenFiles(prev => prev.map(f => {
+      if (f.path === activeFile) {
+        return { ...f, content: newContent, isDirty: true };
+      }
+      return f;
+    }));
+  };
 
   const handleFolderClick = (path) => setSelectedPath(path);
 
@@ -401,7 +524,7 @@ function App() {
 
   const addTerminal = () => {
     const newId = `term-${Date.now()}`;
-    setTerminals([...terminals, { id: newId, title: 'powershell' }]);
+    setTerminals([...terminals, { id: newId, title: 'terminal' }]);
     setActiveTerminalId(newId);
     setTerminalOpen(true);
   };
@@ -436,6 +559,7 @@ function App() {
       const dir = activeFile.substring(0, lastSlash);
       const name = activeFile.substring(lastSlash + 1);
       await invoke('save_note', { dir, title: name, content })
+      setOpenFiles(prev => prev.map(f => f.path === activeFile ? { ...f, isDirty: false } : f));
       setSaving(false)
     } catch (error) {
       alert('Save failed: ' + error)
@@ -443,23 +567,6 @@ function App() {
     }
   }
 
-  const handleDelete = async () => {
-    if (!contextMenu?.fileName) return
-    if (!confirm(`Delete ${contextMenu.fileName}?`)) return
-    try {
-      await invoke('delete_file', { dir: contextMenu.parentPath, name: contextMenu.fileName })
-      if (activeFile === contextMenu.fullPath) {
-        setActiveFile(null)
-        setTitle('')
-        setContent('')
-      }
-      await fetchFiles()
-      emit('refresh-files')
-    } catch (error) {
-      alert('Delete failed: ' + error)
-    }
-    setContextMenu(null)
-  }
 
   const handleRename = () => {
     if (!contextMenu?.fullPath) return
@@ -483,6 +590,7 @@ function App() {
         newName: newName 
       })
       const newFullPath = parentPath ? `${parentPath}/${newName}` : newName;
+      setOpenFiles(prev => prev.map(f => f.path === oldPath ? { ...f, path: newFullPath, name: newName } : f));
       if (activeFile === oldPath) {
         setActiveFile(newFullPath)
         setTitle(newName)
@@ -676,7 +784,6 @@ function App() {
                 )}
               </AnimatePresence>
             </div>
-            <button className="px-3 py-1 text-[11px] font-medium text-text-secondary/30 cursor-not-allowed">Help</button>
           </div>
         </div>
         
@@ -703,7 +810,7 @@ function App() {
                 exit={{ width: 0, opacity: 0 }}
                 className="h-full bg-bg-primary border-r border-border flex flex-col overflow-hidden"
               >
-                <div className="h-9 px-3 border-b border-border flex items-center justify-between bg-bg-secondary/30">
+                <div className="h-10 px-3 border-b border-border flex items-center justify-between bg-bg-secondary/30">
                   <span className="text-[10px] font-bold tracking-widest text-text-secondary uppercase">Explorer</span>
                   <div className="flex items-center gap-0.5">
                     <button onClick={createNote} className="p-1 hover:bg-bg-secondary rounded transition-colors text-text-secondary hover:text-accent" title="New File"><Plus size={14} /></button>
@@ -805,29 +912,72 @@ function App() {
           </header>
 
           <div className="flex-1 relative overflow-hidden grid grid-rows-[1fr_auto] min-h-0">
-            <div className="overflow-hidden min-h-0">
-              {activeFile ? (
-                <CodeEditor 
-                  activeFile={activeFile}
-                  content={content}
-                  setContent={setContent}
-                />
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center p-12 text-center bg-radial-at-t from-bg-secondary/20 to-transparent">
-                  <div className="max-w-md space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-                    <img src="/kiteicon.png" alt="Kite Logo" className="w-20 h-20 mx-auto opacity-20 grayscale brightness-200" />
-                    <div className="space-y-2">
-                      <h1 className="text-2xl font-bold tracking-tight text-text-primary">Welcome to Kite IDE</h1>
-                      <p className="text-sm text-text-secondary leading-relaxed">The AI-first workspace. Select a file from the explorer or create a new project to start building.</p>
+            <div className="flex-1 flex flex-col min-h-0 bg-bg-primary">
+              {openFiles.length > 0 && (
+                <div className="h-8 bg-bg-secondary/10 border-b border-border flex items-center overflow-x-auto no-scrollbar shrink-0">
+                  {openFiles.map((file) => (
+                    <div 
+                      key={file.path}
+                      onClick={() => {
+                        setActiveFile(file.path);
+                        setTitle(file.name);
+                        setContent(file.content);
+                      }}
+                      className={`group relative flex items-center gap-2 px-3 h-full text-[10px] font-bold cursor-pointer transition-all border-r border-border shrink-0 select-none ${activeFile === file.path ? 'bg-bg-primary text-accent' : 'text-text-secondary hover:bg-bg-secondary/30'}`}
+                    >
+                      {/* Active Indicator Strip */}
+                      {activeFile === file.path && (
+                        <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-accent z-10" />
+                      )}
+                      
+                      {getFileIcon(file.name)}
+                      <span className={`max-w-[200px] truncate transition-colors ${activeFile === file.path ? 'text-text-primary' : 'group-hover:text-text-primary'}`}>{getRelativePath(file.path)}</span>
+                      
+                      <div className="flex items-center justify-center w-4 h-4 -mr-1">
+                        {file.isDirty ? (
+                          <div className="w-1.5 h-1.5 rounded-full bg-accent/80 border-2 border-transparent group-hover:hidden transition-all shadow-[0_0_6px_rgba(var(--accent-rgb),0.4)]" />
+                        ) : null}
+                        <button 
+                          onClick={(e) => closeFile(e, file.path)}
+                          className={`p-0.5 rounded-md hover:bg-bg-secondary text-text-secondary hover:text-red-500 transition-all ${file.isDirty ? 'hidden group-hover:flex' : 'opacity-0 group-hover:opacity-100'}`}
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+
+                      {/* Bottom bridge for active tab */}
+                      {activeFile === file.path && (
+                        <div className="absolute -bottom-[1px] left-0 right-0 h-[1px] bg-bg-primary z-20" />
+                      )}
                     </div>
-                    {!currentDir && (
-                      <button onClick={handleOpenFolder} className="px-6 py-2.5 bg-accent text-white rounded-xl text-sm font-bold shadow-xl shadow-accent/20 hover:opacity-90 active:scale-95 transition-all">
-                        Open Workspace
-                      </button>
-                    )}
-                  </div>
+                  ))}
                 </div>
               )}
+              
+              <div className="flex-1 relative overflow-hidden min-h-0">
+                {activeFile ? (
+                  <CodeEditor 
+                    activeFile={activeFile}
+                    content={content}
+                    setContent={handleContentChange}
+                  />
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center p-12 text-center bg-radial-at-t from-bg-secondary/20 to-transparent">
+                    <div className="max-w-md space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                      <img src="/kiteicon.png" alt="Kite Logo" className="w-20 h-20 mx-auto opacity-20 grayscale brightness-200" />
+                      <div className="space-y-2">
+                        <h1 className="text-2xl font-bold tracking-tight text-text-primary">Welcome to Kite IDE</h1>
+                        <p className="text-sm text-text-secondary leading-relaxed">The AI-first workspace. Select a file from the explorer or create a new project to start building.</p>
+                      </div>
+                      {!currentDir && (
+                        <button onClick={handleOpenFolder} className="px-6 py-2.5 bg-accent text-white rounded-xl text-sm font-bold shadow-xl shadow-accent/20 hover:opacity-90 active:scale-95 transition-all">
+                          Open Workspace
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
           <div className={`relative z-30 flex-shrink-0 ${terminalOpen ? 'block' : 'hidden'}`}>
@@ -842,7 +992,7 @@ function App() {
               className="bg-bg-primary border-t border-border flex flex-col overflow-hidden"
               style={{ height: terminalOpen ? 'var(--terminal-height)' : 0 }}
             >
-              <div className="h-9 px-3 flex items-center justify-between bg-bg-secondary/30 shrink-0">
+              <div className="h-10 px-3 flex items-center justify-between bg-bg-secondary/30 shrink-0">
                 <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
                   {terminals.map((term) => (
                     <button 
@@ -964,7 +1114,11 @@ function App() {
                 </button>
               )}
               <button onClick={handleRename} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-bg-secondary text-text-primary transition-all"><Edit3 size={14} className="text-text-secondary" /> <span>Rename</span></button>
-              <button onClick={handleDelete} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-red-50 text-red-600 transition-all font-bold"><Trash2 size={14} /> <span>Delete</span></button>
+              <button onClick={handleDelete} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-red-50 text-red-600 transition-all font-bold">
+                <Trash2 size={14} /> 
+                <span>Delete</span>
+                <span className="ml-auto opacity-50 text-[10px] font-normal uppercase tracking-wider">Del</span>
+              </button>
             </motion.div>
           </>
         )}
