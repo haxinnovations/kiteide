@@ -15,7 +15,7 @@
 
 - **Core**: [Tauri](https://tauri.app/) (Rust)
 - **Frontend**: [React](https://react.dev/) + [Vite](https://vitejs.dev/)
-- **Styling**: Vanilla CSS
+- **Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
 - **Animations**: [Framer Motion](https://www.framer.com/motion/)
 - **Terminal**: [xterm.js](https://xtermjs.org/)
 - **Icons**: [Lucide React](https://lucide.dev/)
