@@ -17,9 +17,10 @@
         "height": 700,
         "resizable": true,
         "center": true,
-        "decorations": false,
-        "transparent": true,
-        "shadow": true
+        "decorations": true,
+        "transparent": false,
+        "shadow": true,
+        "devtools": true
       }
     ],
     "security": {

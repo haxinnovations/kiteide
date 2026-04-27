@@ -15,7 +15,8 @@ const appWindow = getCurrentWindow();
 function App() {
   const [currentDir, setCurrentDir] = useState(() => {
     const saved = localStorage.getItem('kite-dir')
-    return (saved === 'null' || saved === 'undefined') ? null : saved.replace(/\\/g, '/')
+    if (!saved || saved === 'null' || saved === 'undefined') return null;
+    return saved.replace(/\\/g, '/')
   })
 
   const [activeFile, setActiveFile] = useState(null)
