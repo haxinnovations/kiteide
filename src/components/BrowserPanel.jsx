@@ -88,7 +88,7 @@ const BrowserPanel = ({ onClose, activeFile, onApplyEdits, onCreateFile, onRefre
     const textarea = textareaRef.current;
     if (textarea) {
       if (!input) {
-        textarea.style.height = '60px'; // Exact original min-height
+        textarea.style.height = '100px'; // Increased min-height
       } else {
         textarea.style.height = 'auto';
         textarea.style.height = `${Math.min(textarea.scrollHeight, 400)}px`;
@@ -130,22 +130,38 @@ const BrowserPanel = ({ onClose, activeFile, onApplyEdits, onCreateFile, onRefre
     
     // Use a small timeout to ensure state has updated or handleSend uses the right base
     setTimeout(() => {
-      handleSend(lastUserMessage.content, baseHistory);
+      handleSend(lastUserMessage.content, baseHistory, 0);
     }, 0);
   }, [messages, loading]);
 
-  const handleSend = useCallback(async (manualPrompt, overrideHistory = null) => {
-    const promptText = typeof manualPrompt === 'string' ? manualPrompt : input;
-    if (!promptText.trim() || loading) return;
+  const handleSend = useCallback(async (manualPrompt, overrideHistory = null, retryCount = 0) => {
     if (!apiKey) {
       setShowSettings(true);
       return;
     }
 
-    const text = promptText.trim();
-    if (typeof manualPrompt !== 'string') setInput('');
-    const baseMessages = overrideHistory || messages;
-    const newMessages = [...baseMessages, { role: 'user', content: text }];
+    let newMessages = overrideHistory || [...messages];
+    let text;
+    if (manualPrompt) {
+      const msgObj = typeof manualPrompt === 'string' 
+        ? { role: 'user', content: manualPrompt }
+        : { role: 'user', ...manualPrompt };
+      newMessages.push(msgObj);
+      text = msgObj.content;
+      if (typeof manualPrompt !== 'object') setInput('');
+    } else if (!overrideHistory) {
+      // Direct user input from the text field
+      text = input.trim();
+      if (!text || loading) return;
+      newMessages.push({ role: 'user', content: text });
+      setInput('');
+    } else {
+      // Background process or retry - use the last message in history
+      text = newMessages[newMessages.length - 1]?.content || "";
+    }
+
+    if (!text && !overrideHistory) return;
+    
     setMessages(newMessages);
     
     // Abort existing request if any
@@ -169,6 +185,8 @@ PROJECT ENVIRONMENT:
 - Active Directory: ${projectDir || 'Not specified'}
 - All file paths (listFiles, readFile, edits) should be relative to this directory unless absolute.
 - DIRECTORY CREATION: If you want to create a file in a directory that does not exist, you MUST first create that folder using a terminal command (e.g., "mkdir -p src/components").
+- FILE EXISTENCE: Before creating a new file, you MUST check if the file or its parent directory already exists using 'listFiles' if that information is not already in the conversation context. Do not overwrite files blindly.
+- TASK ORDER: You MUST follow the roadmap tasks in strict sequential order. Finish existing incomplete tasks before starting any new tasks you've added. Never skip a task. Even if you want to perform multiple tasks at once, you must mark them as completed in order.
 
 TOOL PRIORITIZATION:
 1. PRIMARY (Code Changes): Use the 'edits' array and 'newFile' object for all file creation and modifications. This is safer and more reliable than terminal commands.
@@ -186,23 +204,26 @@ CRITICAL: All code content in 'replacement', 'content', or 'commands' MUST be pr
 For edits: include an 'edits' array with {'file', 'startLine', 'endLine', 'replacement'}. 
 For new files: include a 'newFile' object with {'name', 'content'}. 
 For listing files: include a 'listFiles' string (the path to list).
-For reading files: include a 'readFile' string (the path to read).
-For terminal commands: include a 'commands' array of strings.
-Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": null, "readFile": null, "commands": [], "tasks": [], "taskCompleted": null}`
+- For reading files: include a 'readFile' string (the path to read).
+- For viewing tasks: include a 'viewTasks' boolean (set to true to see the roadmap).
+- For terminal commands: include a 'commands' array of strings.
+Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": null, "readFile": null, "viewTasks": false, "commands": [], "tasks": [], "taskCompleted": null}`
         : `You are the native Kite AI Assistant. Return your response strictly as a JSON object. 
 PROJECT ENVIRONMENT:
 - Active Directory: ${projectDir || 'Not specified'}
 - DIRECTORY CREATION: If you want to create a file in a directory that does not exist, you MUST first create that folder using a terminal command (e.g., "mkdir -p src/components").
+- FILE EXISTENCE: Before creating a new file, you MUST check if it already exists using 'listFiles' if the directory context is not already present in the chat.
+- TASK ORDER: Always work on tasks in sequential order. Do not skip ahead.
 CRITICAL: All code content in 'replacement', 'content', or 'commands' MUST be properly JSON-escaped. Especially double quotes must be escaped as \\".
-For edits: include an 'edits' array with {'startLine', 'endLine', 'replacement'}. 
-For new files: include a 'newFile' object with {'name', 'content'}. 
-For listing files: include a 'listFiles' string (the path to list).
-For reading files: include a 'readFile' string (the path to read).
+- For edits: include an 'edits' array with {'startLine', 'endLine', 'replacement'}. 
+- For tasks: include a 'tasks' array with {'id', 'title', 'completed', 'order'}. Use this for the project roadmap.
+- When a task is done: set 'taskCompleted' to that task's ID or Title.
+- For new files: include a 'newFile' object with {'name', 'content'}. 
 For terminal commands: include a 'commands' array of strings.
 Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": null, "readFile": null, "commands": []}`;
 
-      // Trim history based on contextLimit
-      const historyToKeep = baseMessages.slice(-contextLimit);
+      // Trim history based on contextLimit (excluding the current prompt which is added manually)
+      const historyToKeep = newMessages.slice(0, -1).slice(-contextLimit);
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`, {
         method: 'POST',
@@ -212,9 +233,9 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
           contents: [
             ...historyToKeep.map(m => ({
               role: m.role === 'assistant' ? 'model' : 'user',
-              parts: [{ text: m.content }]
+              parts: [{ text: m.content || " " }]
             })),
-            { role: 'user', parts: [{ text: prompt }] }
+            { role: 'user', parts: [{ text: prompt || " " }] }
           ],
           system_instruction: {
             parts: [{ text: systemInstruction }]
@@ -241,48 +262,56 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
         let parsed = JSON.parse(jsonCandidate);
         const assistantMessage = { 
           role: 'assistant', 
-          content: parsed.reply,
-          edits: parsed.edits || [],
+          content: parsed.reply || "",
+          edits: Array.isArray(parsed.edits) ? parsed.edits : [],
           newFile: parsed.newFile || null,
-          commands: parsed.commands || [],
+          commands: Array.isArray(parsed.commands) ? parsed.commands : [],
           listFiles: parsed.listFiles || null,
           readFile: parsed.readFile || null,
-          tasks: parsed.tasks || [],
+          viewTasks: parsed.viewTasks || false,
+          tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
           taskCompleted: parsed.taskCompleted || null,
           raw: jsonCandidate
         };
 
-        // Agent/Assistant Mode Switch
-        if (mode === 'agent') {
-          // 1. Handle Tasks (Roadmap) - Merging behavior
-          if (assistantMessage.tasks && assistantMessage.tasks.length > 0) {
-            setTasks(prev => {
-              const newTasks = [...prev];
-              assistantMessage.tasks.forEach(task => {
-                const existingIdx = newTasks.findIndex(t => t.id === task.id);
-                if (existingIdx !== -1) {
-                  newTasks[existingIdx] = task; // Update existing
-                } else {
-                  newTasks.push(task); // Add new
-                }
-              });
-              return newTasks;
+        // 1. Unified Task (Roadmap) Management
+        let updatedTasks = [...tasks];
+        if (assistantMessage.tasks.length > 0 || assistantMessage.taskCompleted) {
+          // Calculate the new state locally for immediate tool use
+          let newTasks = [...tasks];
+          if (assistantMessage.tasks.length > 0) {
+            const currentMaxOrder = newTasks.length > 0 ? Math.max(...newTasks.map(t => t.order || 0)) : 0;
+            assistantMessage.tasks.forEach((task, idx) => {
+              const existingIdx = newTasks.findIndex(t => t.id === task.id);
+              if (existingIdx !== -1) {
+                newTasks[existingIdx] = { ...newTasks[existingIdx], ...task };
+              } else {
+                newTasks.push({ ...task, order: task.order !== undefined ? task.order : (currentMaxOrder + idx + 1) });
+              }
             });
             setShowTasks(true);
           }
-
           if (assistantMessage.taskCompleted) {
-            setTasks(prev => prev.map(t => t.id === assistantMessage.taskCompleted ? { ...t, completed: true } : t));
+            const target = assistantMessage.taskCompleted.toString().toLowerCase().trim();
+            newTasks = newTasks.map(t => {
+              const idMatch = t.id?.toString().toLowerCase().trim() === target;
+              const titleMatch = t.title?.toLowerCase().trim() === target;
+              return (idMatch || titleMatch) ? { ...t, completed: true } : t;
+            });
           }
+          newTasks.sort((a, b) => (a.order || 0) - (b.order || 0));
+          updatedTasks = newTasks;
+          setTasks(newTasks);
+        }
 
-          // 2. Execution Logic
+        // 2. Mode-Specific Execution
+        if (mode === 'agent') {
           const toolResults = [];
           
           const resolvePath = (p) => {
             if (!p) return projectDir;
             if (p.startsWith('/') || p.includes(':')) return p;
             if (p === '.' || p === './') return projectDir;
-            // Basic path joining
             const base = (projectDir || '').replace(/[\\/]$/, '');
             const sub = (p || '').replace(/^[\\/]/, '');
             return `${base}/${sub}`;
@@ -291,12 +320,10 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
           if (assistantMessage.listFiles) {
             try {
               const resolvedDir = resolvePath(assistantMessage.listFiles);
-              console.log('AI requested list:', assistantMessage.listFiles, 'Resolved to:', resolvedDir);
               const results = await invoke('list_files', { dir: resolvedDir });
               const summary = (results || []).map(f => `${f.is_dir ? '[DIR]' : '[FILE]'} ${f.name}`).join('\n');
               toolResults.push(`### Directory contents of ${assistantMessage.listFiles}:\n${summary || '(Empty directory)'}`);
             } catch (err) {
-              console.error('List files error:', err);
               toolResults.push(`Error listing directory ${assistantMessage.listFiles}: ${err.message}`);
             }
           }
@@ -304,7 +331,6 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
           if (assistantMessage.readFile) {
             try {
               const resolvedPath = resolvePath(assistantMessage.readFile);
-              console.log('AI requested read:', assistantMessage.readFile, 'Resolved to:', resolvedPath);
               const lastSlash = Math.max(resolvedPath.lastIndexOf('/'), resolvedPath.lastIndexOf('\\'));
               const dir = lastSlash !== -1 ? resolvedPath.substring(0, lastSlash) : '.';
               const name = lastSlash !== -1 ? resolvedPath.substring(lastSlash + 1) : resolvedPath;
@@ -312,41 +338,59 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
               const lines = content.split('\n').map((l, i) => `${i + 1}: ${l}`).join('\n');
               toolResults.push(`### Contents of ${assistantMessage.readFile}:\n\`\`\`\n${lines}\n\`\`\``);
             } catch (err) {
-              console.error('Read file error:', err);
               toolResults.push(`Error reading file ${assistantMessage.readFile}: ${err.message}`);
             }
+          }
+
+          if (assistantMessage.viewTasks) {
+            const summary = updatedTasks.map(t => `[${t.completed ? 'DONE' : 'PENDING'}] #${t.order || 0} ${t.title}`).join('\n');
+            toolResults.push(`### Current Project Roadmap:\n${summary || 'No tasks defined yet.'}`);
           }
 
           if (!askBeforeDoing) {
             if (assistantMessage.edits.length > 0) onApplyEdits(assistantMessage.edits);
             if (assistantMessage.newFile) onCreateFile(assistantMessage.newFile.name, assistantMessage.newFile.content);
-            if (assistantMessage.commands && assistantMessage.commands.length > 0) {
+            if (assistantMessage.commands.length > 0) {
               for (const cmd of assistantMessage.commands) await runCommand(cmd);
             }
             assistantMessage.applied = true;
           }
 
-          // 3. Update History & Feedback
           const finalMessages = [...newMessages, assistantMessage];
           setMessages(finalMessages);
 
           if (toolResults.length > 0) {
             const feedback = toolResults.join('\n\n---\n\n');
-            console.log('Sending tool results back to AI:', feedback);
-            setTimeout(() => handleSend(feedback, finalMessages), 500);
-          } else if (!askBeforeDoing && (!assistantMessage.commands || assistantMessage.commands.length === 0)) {
-            const currentTasks = assistantMessage.tasks?.length > 0 ? assistantMessage.tasks : tasks;
-            const finishedTasks = currentTasks.filter(t => t.completed || t.id === assistantMessage.taskCompleted);
-            const nextTask = currentTasks.find(t => !t.completed && t.id !== assistantMessage.taskCompleted);
+            const files = toolResults
+              .filter(r => r.includes('### Contents of'))
+              .map(r => r.match(/### Contents of (.*?):/)?.[1])
+              .filter(Boolean);
+            
+            const dirs = toolResults
+              .filter(r => r.includes('### Directory contents of'))
+              .map(r => r.match(/### Directory contents of (.*?):/)?.[1])
+              .filter(Boolean);
+
+            setTimeout(() => handleSend({ 
+              content: feedback, 
+              isToolOutput: true, 
+              viewedFiles: files,
+              viewedDirs: dirs
+            }, finalMessages, 0), 500);
+          } else if (!askBeforeDoing && assistantMessage.commands.length === 0) {
+            const currentTasks = [...(assistantMessage.tasks.length > 0 ? assistantMessage.tasks : tasks)].sort((a, b) => (a.order || 0) - (b.order || 0));
+            const nextTask = currentTasks.find(t => !t.completed && t.id !== assistantMessage.taskCompleted && t.title !== assistantMessage.taskCompleted);
             
             if (nextTask) {
-              const finishedList = finishedTasks.map(t => `- ${t.title}`).join('\n');
-              const feedbackPrompt = finishedList 
-                ? `COMPLETED TASKS:\n${finishedList}\n\nProceed with Task: ${nextTask.title}`
-                : `Proceed with Task: ${nextTask.title}`;
-                
-              console.log('Auto-triggering next task:', nextTask.title);
-              setTimeout(() => handleSend(feedbackPrompt, finalMessages), 1000);
+              const nextIdx = currentTasks.findIndex(t => t.id === nextTask.id);
+              const pendingBefore = currentTasks.slice(0, nextIdx).filter(t => !t.completed && t.id !== assistantMessage.taskCompleted);
+              
+              let feedbackPrompt = `Proceed with Task: ${nextTask.title}`;
+              if (pendingBefore.length > 0) {
+                const pendingList = pendingBefore.map(t => `- ${t.title}`).join('\n');
+                feedbackPrompt = `PENDING PREVIOUS TASKS:\n${pendingList}\n\nNext Task: ${nextTask.title}`;
+              }
+              setTimeout(() => handleSend(feedbackPrompt, finalMessages, 0), 1000);
             }
           }
         } else {
@@ -354,7 +398,20 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
         }
       } catch (e) {
         console.error('JSON Parse/Tool Execution Error:', e);
-        setMessages(prev => [...prev, { role: 'assistant', content: responseText }]);
+        if (retryCount < 1) {
+          console.log('Retrying due to parse error (Attempt 1)...');
+          const feedbackMessages = [...newMessages, 
+            { role: 'assistant', content: responseText }, 
+            { role: 'user', content: "Your last response was not a valid JSON. Please repeat your response strictly as a JSON object." }
+          ];
+          setTimeout(() => handleSend(null, feedbackMessages, retryCount + 1), 500);
+        } else {
+          setMessages(prev => [...prev, { 
+            role: 'assistant', 
+            content: "⚠️ **invalid agent response**",
+            raw: responseText
+          }]);
+        }
       }
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -466,45 +523,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
         </div>
       </div>
 
-      {/* Task Manager Section */}
-      {showTasks && (
-        <div className="bg-bg-primary border-b border-border z-10 flex flex-col animate-in slide-in-from-top duration-200">
-          <div className="px-3 py-1.5 border-b border-border/50 flex justify-between items-center bg-bg-secondary/50">
-            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-text-secondary/60">Project Roadmap</span>
-            <div className="flex items-center gap-2">
-              <span className="text-[9px] font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded">
-                {tasks.filter(t => t.completed).length} / {tasks.length} DONE
-              </span>
-              <button onClick={() => setShowTasks(false)} className="text-text-secondary/40 hover:text-accent transition-colors"><X size={12} /></button>
-            </div>
-          </div>
-          <div className="max-h-[180px] overflow-y-auto py-1 custom-scrollbar">
-            {tasks.length === 0 ? (
-              <div className="p-4 text-center text-[11px] text-text-secondary/50 italic font-medium">No active roadmap</div>
-            ) : (
-              tasks.map(task => (
-                <div key={task.id} className={`flex items-center gap-2.5 px-4 py-1.5 hover:bg-bg-secondary/50 transition-colors ${task.completed ? 'opacity-40' : ''}`}>
-                  {task.completed ? <CheckCircle2 size={13} className="text-green-600 flex-shrink-0" /> : <Circle size={13} className="text-text-secondary/40 flex-shrink-0" />}
-                  <span className={`text-[12px] font-medium truncate ${task.completed ? 'line-through text-text-secondary' : 'text-text-primary'}`}>{task.title}</span>
-                </div>
-              ))
-            )}
-          </div>
-          {tasks.length > 0 && tasks.some(t => !t.completed) && askBeforeDoing && (
-            <div className="p-2 bg-bg-secondary/20">
-              <button 
-                className="w-full bg-accent text-white py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider hover:opacity-90 transition-opacity flex justify-center items-center gap-2 shadow-lg shadow-accent/10"
-                onClick={() => {
-                  const nextTask = tasks.find(t => !t.completed);
-                  if (nextTask) handleSend(`Proceed with Task: ${nextTask.title}`);
-                }}
-              >
-                <Zap size={12} /> Start Next Phase
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+
 
       {/* Settings Overlay */}
       {showSettings && (
@@ -572,6 +591,48 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
         </div>
       )}
 
+      {/* Roadmap / Tasks */}
+      {showTasks && tasks.length > 0 && (
+        <div className="bg-bg-secondary/30 border-b border-border/10">
+          <div className="max-w-3xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <ListTodo size={16} className="text-accent" strokeWidth={2.5} />
+                <h3 className="text-[11px] font-black uppercase tracking-widest text-text-primary/70">Project Roadmap</h3>
+                <span className="ml-2 text-[9px] font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded">
+                  {tasks.filter(t => t.completed).length} / {tasks.length} DONE
+                </span>
+              </div>
+              <button 
+                onClick={() => setShowTasks(false)}
+                className="p-1 hover:bg-bg-secondary rounded-lg transition-colors text-text-secondary"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
+              {tasks.map((task) => (
+                <div key={task.id} className="flex items-center gap-3 py-1 group">
+                  <div className="flex-shrink-0">
+                    {task.completed ? (
+                      <CheckCircle2 size={16} className="text-green-500" />
+                    ) : (
+                      <Circle size={16} className="text-text-secondary/30" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="text-[10px] font-black font-mono text-accent/40 w-6">#{task.order || 0}</span>
+                    <span className={`text-[12.5px] truncate ${task.completed ? 'text-text-secondary line-through opacity-50' : 'text-text-primary font-medium'}`}>
+                      {task.title}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto space-y-0 scroll-smooth">
         {messages.length === 0 && (
@@ -585,7 +646,34 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
           <div key={i} className={`group py-4 px-6 ${msg.role === 'user' ? 'bg-bg-secondary/40 border-y border-border/10' : ''} animate-in fade-in slide-in-from-bottom-1 duration-300`}>
             <div className="max-w-3xl mx-auto">
               <div className="prose prose-sm max-w-none text-[13.5px] leading-relaxed text-text-primary prose-p:my-1 prose-pre:bg-bg-secondary prose-pre:text-text-primary prose-code:text-accent relative">
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                {msg.isToolOutput && (msg.viewedFiles?.length > 0 || msg.viewedDirs?.length > 0) ? (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                      {msg.viewedDirs?.map((dir, idx) => (
+                        <div key={`dir-${idx}`} className="flex items-center gap-2 bg-purple-500/5 border border-purple-500/10 px-3 py-1.5 rounded-lg text-purple-500 text-[11px] font-black uppercase tracking-wider animate-pulse">
+                          <History size={13} />
+                          <span>Exploring: {dir === '.' ? 'Project Structure' : dir}</span>
+                        </div>
+                      ))}
+                      {msg.viewedFiles?.map((file, idx) => (
+                        <div key={`file-${idx}`} className="flex items-center gap-2 bg-accent/5 border border-accent/10 px-3 py-1.5 rounded-lg text-accent text-[11px] font-black uppercase tracking-wider animate-pulse">
+                          <FileCode size={13} />
+                          <span>Analyzing: {file}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-[11px] text-text-secondary/60 italic font-medium">
+                      <ReactMarkdown>
+                        {msg.content.split('\n\n---\n\n')
+                          .filter(p => !p.includes('### Contents of') && !p.includes('### Directory contents of'))
+                          .join('\n\n---\n\n')}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                ) : (
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                )}
+
                 
                 {/* Tools Usage Indicator */}
                 {msg.role === 'assistant' && (msg.edits?.length > 0 || msg.newFile || msg.commands?.length > 0 || msg.listFiles || msg.readFile) && (
@@ -670,7 +758,11 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
                         }}
                       >
                         <Zap size={14} className="group-hover:animate-pulse" />
-                        <span>Apply Changes to {activeFile?.name || 'File'}</span>
+                        <span>
+                          Apply Changes to {
+                            [...new Set(msg.edits.map(e => e.file || activeFile?.name))].join(', ') || 'File'
+                          }
+                        </span>
                       </button>
                     )}
                   </div>
@@ -793,7 +885,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               placeholder={mode === 'agent' ? "How can I help you build today?" : "Ask Gemini anything..."}
-              className="w-full bg-transparent px-0 py-5 pr-12 text-[14px] leading-relaxed focus:outline-none resize-none min-h-[60px] max-h-[400px] placeholder:text-text-secondary/30 text-text-primary"
+              className="w-full bg-transparent px-0 py-5 pr-12 text-[14px] leading-relaxed focus:outline-none resize-none min-h-[100px] max-h-[400px] placeholder:text-text-secondary/30 text-text-primary"
               rows={1}
               disabled={loading}
             />

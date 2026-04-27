@@ -15,7 +15,7 @@ const appWindow = getCurrentWindow();
 function App() {
   const [currentDir, setCurrentDir] = useState(() => {
     const saved = localStorage.getItem('kite-dir')
-    return (saved === 'null' || saved === 'undefined') ? null : saved
+    return (saved === 'null' || saved === 'undefined') ? null : saved.replace(/\\/g, '/')
   })
 
   const [activeFile, setActiveFile] = useState(null)
@@ -33,6 +33,8 @@ function App() {
   const [contextMenu, setContextMenu] = useState(null)
   const [clipboard, setClipboard] = useState(null) // { path, type, name }
   const [terminalMenu, setTerminalMenu] = useState(null); // { id, x, y }
+  const [renamingPath, setRenamingPath] = useState(null)
+  const [creatingItem, setCreatingItem] = useState(null) // { parentPath, type }
 
   const isResizingSidebar = useRef(false)
   const isResizingTerminal = useRef(false)
@@ -345,41 +347,48 @@ function App() {
   const handleContextMenu = (e, file, parentPath) => {
     e.preventDefault()
     e.stopPropagation()
-    const fullPath = parentPath ? `${parentPath}/${file.name}` : file.name;
+    const fullPath = (parentPath ? `${parentPath}/${file.name}` : file.name).replace(/\\/g, '/');
     setSelectedPath(fullPath);
     setContextMenu({ x: e.clientX, y: e.clientY, fileName: file.name, parentPath: parentPath, isDir: file.is_dir, fullPath: fullPath })
   }
 
   const getTargetDir = async () => {
-    if (!selectedPath) return currentDir;
-    const isFile = selectedPath.includes('.') && !selectedPath.endsWith('/'); 
-    if (isFile) return selectedPath.substring(0, selectedPath.lastIndexOf('/'));
-    return selectedPath;
+    let target = selectedPath || currentDir;
+    if (!target) return currentDir;
+    target = target.replace(/\\/g, '/');
+    const isFile = target.includes('.') && !target.endsWith('/'); 
+    if (isFile) return target.substring(0, target.lastIndexOf('/'));
+    return target;
   }
 
   const createNote = async () => {
     const targetDir = await getTargetDir();
-    const name = prompt(`Create new file in ${getDirName(targetDir)}:`)
-    if (!name) return
-    try {
-      await invoke('create_file', { dir: targetDir, name })
-      await fetchFiles()
-      handleFileClick({ name, is_dir: false }, targetDir)
-    } catch (error) {
-      alert('Failed to create file: ' + error)
-    }
+    setCreatingItem({ parentPath: targetDir, type: 'file' });
   }
 
   const createNewFolder = async () => {
     const targetDir = await getTargetDir();
-    const name = prompt(`Create new folder in ${getDirName(targetDir)}:`)
-    if (!name) return
-    try {
-      await invoke('create_dir', { dir: targetDir, name })
-      await fetchFiles()
-    } catch (error) {
-      alert('Failed to create folder: ' + error)
+    setCreatingItem({ parentPath: targetDir, type: 'folder' });
+  }
+
+  const submitCreation = async (parentPath, name, type) => {
+    if (!name) {
+      setCreatingItem(null);
+      return;
     }
+    try {
+      if (type === 'file') {
+        await invoke('create_file', { dir: parentPath, name })
+        handleFileClick({ name, is_dir: false }, parentPath)
+      } else {
+        await invoke('create_dir', { dir: parentPath, name })
+      }
+      await fetchFiles()
+      emit('refresh-files')
+    } catch (error) {
+      alert(`Failed to create ${type}: ` + error)
+    }
+    setCreatingItem(null);
   }
 
   const addTerminal = () => {
@@ -444,18 +453,29 @@ function App() {
     setContextMenu(null)
   }
 
-  const handleRename = async () => {
-    if (!contextMenu?.fileName) return
-    const newName = prompt('New name:', contextMenu.fileName)
-    if (!newName || newName === contextMenu.fileName) return
+  const handleRename = () => {
+    if (!contextMenu?.fullPath) return
+    setRenamingPath(contextMenu.fullPath)
+    setContextMenu(null)
+  }
+
+  const submitRename = async (oldPath, newName) => {
+    if (!newName || newName === getDirName(oldPath)) {
+      setRenamingPath(null)
+      return
+    }
+    
+    const parentPath = getParentDir(oldPath)
+    const oldName = getDirName(oldPath)
+    
     try {
       await invoke('rename_file', { 
-        dir: contextMenu.parentPath, 
-        old_name: contextMenu.fileName, 
-        new_name: newName 
+        dir: parentPath, 
+        oldName: oldName, 
+        newName: newName 
       })
-      const newFullPath = contextMenu.parentPath ? `${contextMenu.parentPath}/${newName}` : newName;
-      if (activeFile === contextMenu.fullPath) {
+      const newFullPath = parentPath ? `${parentPath}/${newName}` : newName;
+      if (activeFile === oldPath) {
         setActiveFile(newFullPath)
         setTitle(newName)
       }
@@ -464,7 +484,7 @@ function App() {
     } catch (error) {
       alert('Rename failed: ' + error)
     }
-    setContextMenu(null)
+    setRenamingPath(null)
   }
 
 
@@ -673,6 +693,10 @@ function App() {
                       activeFile={activeFile}
                       selectedPath={selectedPath}
                       clipboard={clipboard}
+                      renamingPath={renamingPath}
+                      onRename={submitRename}
+                      creatingItem={creatingItem}
+                      onCreationSubmit={submitCreation}
                     />
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center p-6 text-center space-y-4 opacity-50">

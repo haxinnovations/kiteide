@@ -5,12 +5,12 @@ import { listen } from '@tauri-apps/api/event'
 import { FileText, Folder, ChevronRight, ChevronDown, Image, Code2, Globe, Palette, Braces, Settings } from 'lucide-react'
 
 // Recursive File Tree Item Component
-const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFile, selectedPath, onFolderClick, clipboard }) => {
+const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFile, selectedPath, onFolderClick, clipboard, renamingPath, onRename, creatingItem, onCreationSubmit }) => {
   const [expanded, setExpanded] = useState(level === 0);
   const [children, setChildren] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const fullPath = path ? `${path}/${file.name}` : file.name;
+  const fullPath = (path ? `${path}/${file.name}` : file.name).replace(/\\/g, '/');
 
   const getFileIcon = (filename) => {
     const ext = filename.split('.').pop().toLowerCase();
@@ -50,6 +50,12 @@ const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFil
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (creatingItem && creatingItem.parentPath === fullPath && !expanded) {
+      setExpanded(true);
+    }
+  }, [creatingItem, fullPath, expanded]);
 
   useEffect(() => {
     if (expanded && children.length === 0) {
@@ -120,7 +126,29 @@ const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFil
             {iconData.icon}
           </span>
         )}
-        <span className="truncate flex-1">{file.name}</span>
+        {renamingPath === fullPath ? (
+          <input 
+            autoFocus
+            className="bg-bg-primary text-text-primary px-1 py-0.5 border border-accent/50 rounded outline-none w-full text-[12px] font-medium"
+            defaultValue={file.name}
+            onFocus={(e) => {
+              const dotIdx = file.name.lastIndexOf('.');
+              if (!file.is_dir && dotIdx > 0) {
+                e.target.setSelectionRange(0, dotIdx);
+              } else {
+                e.target.select();
+              }
+            }}
+            onBlur={(e) => onRename(fullPath, e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onRename(fullPath, e.target.value);
+              if (e.key === 'Escape') onRename(fullPath, file.name);
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className="truncate flex-1">{file.name}</span>
+        )}
       </div>
       <AnimatePresence>
         {expanded && file.is_dir && (
@@ -130,6 +158,24 @@ const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFil
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
+            {creatingItem && creatingItem.parentPath === fullPath && (
+              <div className="flex items-center gap-1.5 py-1 px-3" style={{ paddingLeft: `${(level + 1) * 16 + 12}px` }}>
+                <span className="text-text-secondary opacity-70">
+                  {creatingItem.type === 'file' ? <FileText size={14} /> : <Folder size={14} className="text-accent fill-current" />}
+                </span>
+                <input 
+                  autoFocus
+                  className="bg-bg-primary text-text-primary px-1 py-0.5 border border-accent/50 rounded outline-none w-full text-[12px] font-medium"
+                  placeholder={creatingItem.type === 'file' ? "name.ext" : "folder name"}
+                  onBlur={(e) => onCreationSubmit(fullPath, e.target.value, creatingItem.type)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') onCreationSubmit(fullPath, e.target.value, creatingItem.type);
+                    if (e.key === 'Escape') onCreationSubmit(null);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </div>
+            )}
             {children.map((child) => (
               <FileTreeItem 
                 key={`${fullPath}/${child.name}`}
@@ -142,6 +188,10 @@ const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFil
                 selectedPath={selectedPath}
                 onFolderClick={onFolderClick}
                 clipboard={clipboard}
+                renamingPath={renamingPath}
+                onRename={onRename}
+                creatingItem={creatingItem}
+                onCreationSubmit={onCreationSubmit}
               />
             ))}
             {loading && <div className="py-1 text-[10px] italic text-text-secondary opacity-50" style={{ paddingLeft: `${(level + 1) * 16 + 28}px` }}>Loading...</div>}
