@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Globe, Plus, Trash2, Save, Sidebar as SidebarIcon, RefreshCw, Edit3, FolderOpen, FolderPlus, Terminal as TerminalIcon, X, Minus, Square, Sparkles, RotateCcw, RotateCw, Scissors, Copy, CopyPlus, Link, MapPin, ClipboardPaste, Check, MoreVertical, Palette, Code2, FileText, Braces, Image, Settings } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
@@ -9,6 +9,7 @@ import Terminal from './components/Terminal'
 import BrowserPanel from './components/BrowserPanel'
 import CodeEditor from './components/CodeEditor'
 import FileTreeItem from './components/FileTreeItem'
+import LspManager from './components/LspManager'
 
 const appWindow = getCurrentWindow();
 
@@ -35,13 +36,15 @@ function App() {
   const getFileIcon = (filename) => {
     const ext = filename.split('.').pop().toLowerCase();
     const icons = {
-      js: { icon: <Code2 size={14} />, color: 'text-yellow-500' },
-      jsx: { icon: <Code2 size={14} />, color: 'text-blue-400' },
+      js: { icon: <img src="/src/assets/icons/js.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
+      jsx: { icon: <img src="/src/assets/icons/react.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
       ts: { icon: <Code2 size={14} />, color: 'text-blue-600' },
       tsx: { icon: <Code2 size={14} />, color: 'text-blue-500' },
       css: { icon: <Palette size={14} />, color: 'text-blue-500' },
       scss: { icon: <Palette size={14} />, color: 'text-pink-500' },
-      html: { icon: <Globe size={14} />, color: 'text-orange-500' },
+      html: { icon: <img src="/src/assets/icons/html.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
+      htm: { icon: <img src="/src/assets/icons/html.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
+      py: { icon: <img src="/src/assets/icons/python.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
       json: { icon: <Braces size={14} />, color: 'text-yellow-600' },
       md: { icon: <FileText size={14} />, color: 'text-text-secondary' },
       png: { icon: <Image size={14} />, color: 'text-purple-500' },
@@ -77,7 +80,44 @@ function App() {
   const [renamingPath, setRenamingPath] = useState(null)
   const [creatingItem, setCreatingItem] = useState(null) // { parentPath, type }
   const [showThemeModal, setShowThemeModal] = useState(false)
+  const [showLspModal, setShowLspModal] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('kite-theme') || 'light')
+  const [diagnostics, setDiagnostics] = useState({}) // { uri: [diag] }
+  const [lspEnabled, setLspEnabled] = useState(() => {
+    const saved = localStorage.getItem('kite-lsp-enabled');
+    return saved === null ? true : saved === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('kite-lsp-enabled', lspEnabled);
+  }, [lspEnabled]);
+  
+  const normalizeUri = useCallback((uri) => {
+    if (!uri) return "";
+    try {
+      let decoded = decodeURIComponent(uri);
+      return decoded.replace(/\\/g, '/').toLowerCase();
+    } catch {
+      return uri.toLowerCase();
+    }
+  }, []);
+
+  const onDiagnostics = useCallback((data) => {
+    try {
+      const msg = JSON.parse(data);
+      if (msg.method === 'textDocument/publishDiagnostics') {
+        const { uri, diagnostics: diags } = msg.params;
+        const normalized = normalizeUri(uri);
+        console.log(`[LSP DIAG] ${normalized}:`, diags);
+        setDiagnostics(prev => ({
+          ...prev,
+          [normalized]: diags
+        }));
+      }
+    } catch (e) {
+      console.error("[LSP DIAG ERR]", e);
+    }
+  }, [normalizeUri]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -780,6 +820,10 @@ function App() {
                       <Palette size={14} className="text-text-secondary group-hover:text-accent transition-colors" /> 
                       <span>Color Themes</span>
                     </button>
+                    <button onClick={() => { setShowLspModal(true); setMenu(null); }} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary text-text-primary transition-colors text-left group">
+                      <Code2 size={14} className="text-text-secondary group-hover:text-accent transition-colors" /> 
+                      <span>LSP Settings</span>
+                    </button>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -960,6 +1004,7 @@ function App() {
                     activeFile={activeFile}
                     content={content}
                     setContent={handleContentChange}
+                    diagnostics={lspEnabled ? (diagnostics[normalizeUri(`file:///${activeFile}`)] || []) : []}
                   />
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center p-12 text-center bg-radial-at-t from-bg-secondary/20 to-transparent">
@@ -979,6 +1024,12 @@ function App() {
                 )}
               </div>
             </div>
+
+            <LspManager 
+              activeFile={activeFile} 
+              content={content} 
+              onDiagnostics={onDiagnostics} 
+            />
 
           <div className={`relative z-30 flex-shrink-0 ${terminalOpen ? 'block' : 'hidden'}`}>
             <div 
@@ -1125,20 +1176,17 @@ function App() {
       </AnimatePresence>
 
       {/* Theme Modal Overlay */}
+      {/* Theme Modal */}
       <AnimatePresence>
         {showThemeModal && (
           <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm"
             onClick={() => setShowThemeModal(false)}
           >
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="bg-bg-primary border border-border w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden"
+              initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-bg-primary border border-border w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden"
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-bg-secondary/30">
@@ -1151,55 +1199,87 @@ function App() {
                     <p className="text-[11px] text-text-secondary">Personalize your workspace</p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => setShowThemeModal(false)}
-                  className="p-2 hover:bg-bg-secondary rounded-full transition-colors text-text-secondary"
-                >
+                <button onClick={() => setShowThemeModal(false)} className="p-2 hover:bg-bg-secondary rounded-full transition-colors text-text-secondary">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-6 grid grid-cols-2 gap-4">
+                <button onClick={() => setTheme('light')} className={`flex flex-col gap-3 p-4 rounded-xl border-2 transition-all text-left ${theme === 'light' ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50 bg-bg-secondary/30'}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="w-8 h-8 rounded-lg bg-white border border-gray-200" />
+                    {theme === 'light' && <Check size={16} className="text-accent" />}
+                  </div>
+                  <span className="text-[13px] font-bold text-text-primary">Light</span>
+                </button>
+
+                <button onClick={() => setTheme('dark')} className={`flex flex-col gap-3 p-4 rounded-xl border-2 transition-all text-left ${theme === 'dark' ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50 bg-bg-secondary/30'}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="w-8 h-8 rounded-lg bg-[#0d1117] border border-gray-800" />
+                    {theme === 'dark' && <Check size={16} className="text-accent" />}
+                  </div>
+                  <span className="text-[13px] font-bold text-text-primary">Dark</span>
+                </button>
+              </div>
+
+              <div className="px-6 py-4 bg-bg-secondary/30 border-t border-border flex justify-end">
+                <button onClick={() => setShowThemeModal(false)} className="px-4 py-2 bg-accent text-white rounded-xl text-xs font-bold shadow-md hover:opacity-90 transition-all">Close</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* LSP Modal */}
+      <AnimatePresence>
+        {showLspModal && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm"
+            onClick={() => setShowLspModal(false)}
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-bg-primary border border-border w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-bg-secondary/30">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-accent/10 rounded-xl text-accent">
+                    <Code2 size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-text-primary">LSP Settings</h2>
+                    <p className="text-[11px] text-text-secondary">Language server features</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowLspModal(false)} className="p-2 hover:bg-bg-secondary rounded-full transition-colors text-text-secondary">
                   <X size={18} />
                 </button>
               </div>
 
               <div className="p-6">
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Light Theme */}
-                  <button 
-                    onClick={() => setTheme('light')}
-                    className={`flex flex-col gap-3 p-4 rounded-xl border-2 transition-all text-left ${theme === 'light' ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50 bg-bg-secondary/30'}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="w-8 h-8 rounded-lg bg-white border border-gray-200 shadow-sm" />
-                      {theme === 'light' && <Check size={16} className="text-accent" />}
+                <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-bg-secondary/30">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-accent/10 rounded-lg text-accent">
+                      <Sparkles size={16} />
                     </div>
                     <div>
-                      <span className="text-[13px] font-bold text-text-primary">Light</span>
-                      <p className="text-[10px] text-text-secondary">Clean and bright</p>
+                      <span className="text-[13px] font-bold text-text-primary">Diagnostics</span>
+                      <p className="text-[10px] text-text-secondary">Error squiggles (HTML, CSS)</p>
                     </div>
-                  </button>
-
-                  {/* Dark Theme */}
+                  </div>
                   <button 
-                    onClick={() => setTheme('dark')}
-                    className={`flex flex-col gap-3 p-4 rounded-xl border-2 transition-all text-left ${theme === 'dark' ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50 bg-bg-secondary/30'}`}
+                    onClick={() => setLspEnabled(!lspEnabled)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${lspEnabled ? 'bg-accent' : 'bg-bg-secondary'}`}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="w-8 h-8 rounded-lg bg-[#0d1117] border border-gray-800 shadow-sm" />
-                      {theme === 'dark' && <Check size={16} className="text-accent" />}
-                    </div>
-                    <div>
-                      <span className="text-[13px] font-bold text-text-primary">Dark</span>
-                      <p className="text-[10px] text-text-secondary">Easy on the eyes</p>
-                    </div>
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${lspEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                   </button>
                 </div>
               </div>
 
               <div className="px-6 py-4 bg-bg-secondary/30 border-t border-border flex justify-end">
-                <button 
-                  onClick={() => setShowThemeModal(false)}
-                  className="px-4 py-2 bg-accent text-white rounded-xl text-xs font-bold shadow-md hover:opacity-90 active:scale-95 transition-all"
-                >
-                  Close
-                </button>
+                <button onClick={() => setShowLspModal(false)} className="px-4 py-2 bg-accent text-white rounded-xl text-xs font-bold shadow-md hover:opacity-90 transition-all">Close</button>
               </div>
             </motion.div>
           </motion.div>

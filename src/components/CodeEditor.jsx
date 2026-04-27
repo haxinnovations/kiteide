@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 
-const CodeEditor = ({ content, setContent, activeFile }) => {
+const CodeEditor = ({ content, setContent, activeFile, diagnostics = [] }) => {
   const lineNumbersRef = useRef(null);
   const editorRef = useRef(null);
 
@@ -13,19 +13,63 @@ const CodeEditor = ({ content, setContent, activeFile }) => {
 
   const highlightContent = (text) => {
     if (!text) return '';
-    
-    // Always escape HTML special chars to prevent injection and show literal characters
-    let escaped = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-      
-    // Only apply HTML tag highlighting if it's an HTML file
-    if (activeFile?.endsWith('.html') || activeFile?.endsWith('.htm')) {
-      return escaped.replace(/(&lt;\/?[a-zA-Z0-9]+.*?&gt;)/g, '<span class="html-tag">$1</span>');
+    const diags = diagnostics || [];
+    if (diags.length > 0) {
+      console.log(`[Editor] Rendering ${diags.length} diagnostics`);
     }
     
-    return escaped;
+    const lines = text.split('\n');
+    const isHTML = activeFile?.endsWith('.html') || activeFile?.endsWith('.htm');
+    
+    const highlightedLines = lines.map((line, lineIdx) => {
+      let escapedLine = '';
+      const lineDiags = diagnostics.filter(d => d.range.start.line === lineIdx);
+      
+      // Sort diagnostics by start character
+      const sortedDiags = [...lineDiags].sort((a, b) => a.range.start.character - b.range.start.character);
+      
+      let currentChar = 0;
+      let diagIdx = 0;
+      
+      while (currentChar < line.length) {
+        // Start diagnostic
+        if (diagIdx < sortedDiags.length && sortedDiags[diagIdx].range.start.character === currentChar) {
+          const diag = sortedDiags[diagIdx];
+          const severity = diag.severity === 1 ? 'error' : 'warning';
+          escapedLine += `<span class="lsp-squiggle lsp-${severity}" title="${diag.message.replace(/"/g, '&quot;')}">`;
+        }
+        
+        // End diagnostic
+        if (diagIdx < sortedDiags.length && sortedDiags[diagIdx].range.end.character === currentChar) {
+          escapedLine += '</span>';
+          diagIdx++;
+          // Check if another diagnostic starts at the same spot
+          continue; 
+        }
+        
+        const char = line[currentChar];
+        if (char === '&') escapedLine += '&amp;';
+        else if (char === '<') escapedLine += '&lt;';
+        else if (char === '>') escapedLine += '&gt;';
+        else escapedLine += char;
+        
+        currentChar++;
+      }
+      
+      // Close any open diagnostic at end of line
+      if (diagIdx < sortedDiags.length && sortedDiags[diagIdx].range.start.character < line.length) {
+          escapedLine += '</span>';
+      }
+
+      // Simple tag highlighting for HTML
+      if (isHTML) {
+        escapedLine = escapedLine.replace(/(&lt;\/?[a-zA-Z0-9]+.*?&gt;)/g, '<span class="html-tag">$1</span>');
+      }
+      
+      return escapedLine;
+    });
+    
+    return highlightedLines.join('\n');
   };
 
   const handleKeyDown = (e) => {

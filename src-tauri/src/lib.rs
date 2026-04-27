@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::io::{Read, Write};
+use std::io::{Read, Write, BufRead};
 use std::collections::HashMap;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize, Child, MasterPty};
 use tauri::{State, Emitter, Manager};
@@ -14,6 +14,15 @@ struct TerminalInstance {
 
 struct TerminalState {
     instances: Arc<Mutex<HashMap<String, TerminalInstance>>>,
+}
+
+struct LspInstance {
+    stdin: Arc<Mutex<std::process::ChildStdin>>,
+    child: std::process::Child,
+}
+
+struct LspState {
+    instances: Arc<Mutex<HashMap<String, LspInstance>>>,
 }
 
 
@@ -516,6 +525,133 @@ fn move_file(src: String, dest: String) -> Result<String, String> {
     Ok("Moved successfully".to_string())
 }
 
+// ===== LSP Support =====
+
+#[tauri::command]
+fn spawn_lsp(state: State<LspState>, window: tauri::Window, id: String, command: String, args: Vec<String>) -> Result<(), String> {
+    println!("LSP spawn requested for id: {}, command: {} {:?}", id, command, args);
+
+    // Cleanup existing
+    {
+        let mut instances = state.instances.lock().unwrap();
+        if let Some(mut old) = instances.remove(&id) {
+            let _ = old.child.kill();
+        }
+    }
+
+    use std::process::Stdio;
+    let mut cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    if cwd.ends_with("src-tauri") {
+        if let Some(parent) = cwd.parent() {
+            cwd = parent.to_path_buf();
+        }
+    }
+    println!("Spawning LSP {} in {:?}", id, cwd);
+
+    println!("Executing: {} {:?} in {:?}", command, args, cwd);
+    
+    let mut child = std::process::Command::new(&command)
+        .current_dir(&cwd)
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Spawn failed: {} (CMD: {} {:?})", e, command, args))?;
+
+    let stdin = child.stdin.take().ok_or("Failed to open stdin")?;
+    let stdout = child.stdout.take().ok_or("Failed to open stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to open stderr")?;
+
+    // Store instance
+    {
+        let mut instances = state.instances.lock().unwrap();
+        instances.insert(id.clone(), LspInstance {
+            stdin: Arc::new(Mutex::new(stdin)),
+            child,
+        });
+    }
+
+    // Reader thread (Stdout)
+    let window_clone = window.clone();
+    let id_clone = id.clone();
+    std::thread::spawn(move || {
+        use std::io::BufReader;
+        let mut reader = BufReader::new(stdout);
+        
+        loop {
+            let mut line = String::new();
+            let mut content_length = 0;
+
+            // Read headers
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).is_err() || line.is_empty() { return; }
+                
+                // LSP specifies \r\n but some servers might just use \n
+                let trimmed = line.trim();
+                if trimmed.is_empty() { break; }
+                
+                if line.to_lowercase().starts_with("content-length:") {
+                    if let Some(val) = line.split(':').nth(1) {
+                        content_length = val.trim().parse().unwrap_or(0);
+                    }
+                }
+            }
+
+            if content_length > 0 {
+                let mut buffer = vec![0; content_length];
+                if reader.read_exact(&mut buffer).is_ok() {
+                    let json = String::from_utf8_lossy(&buffer).to_string();
+                    println!("[LSP OUT {}] {}", id_clone, json);
+                    let event_name = format!("lsp-message-{}", id_clone);
+                    let _ = window_clone.emit(&event_name, json);
+                }
+            }
+        }
+    });
+
+    // Stderr thread
+    let id_err = id.clone();
+    std::thread::spawn(move || {
+        use std::io::BufReader;
+        use std::io::BufRead;
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                println!("[LSP ERR {}] {}", id_err, l);
+            }
+        }
+    });
+    
+
+    Ok(())
+}
+
+#[tauri::command]
+fn write_to_lsp(state: State<LspState>, id: String, message: String) -> Result<(), String> {
+    let mut instances = state.instances.lock().unwrap();
+    if let Some(instance) = instances.get_mut(&id) {
+        let framed = format!("Content-Length: {}\r\n\r\n{}", message.len(), message);
+        println!("[LSP IN {}] {}", id, message); // Log the message itself
+        let mut stdin = instance.stdin.lock().unwrap();
+        stdin.write_all(framed.as_bytes()).map_err(|e| e.to_string())?;
+        stdin.flush().map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err(format!("LSP instance {} not found", id))
+    }
+}
+
+#[tauri::command]
+fn close_lsp(state: State<LspState>, id: String) -> Result<(), String> {
+    let mut instances = state.instances.lock().unwrap();
+    if let Some(mut instance) = instances.remove(&id) {
+        let _ = instance.child.kill();
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -523,6 +659,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(TerminalState {
+            instances: Arc::new(Mutex::new(HashMap::new())),
+        })
+        .manage(LspState {
             instances: Arc::new(Mutex::new(HashMap::new())),
         })
         .invoke_handler(tauri::generate_handler![
@@ -550,7 +689,10 @@ pub fn run() {
             eval_browser,
             send_to_gemini,
             read_gemini_response,
-            open_in_browser
+            open_in_browser,
+            spawn_lsp,
+            write_to_lsp,
+            close_lsp
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -560,6 +702,13 @@ pub fn run() {
                 let mut instances = state.instances.lock().unwrap();
                 for (_, mut instance) in instances.drain() {
                     println!("App exiting: Killing terminal process...");
+                    let _ = instance.child.kill();
+                }
+
+                let lsp_state = app_handle.state::<LspState>();
+                let mut lsp_instances = lsp_state.instances.lock().unwrap();
+                for (_, mut instance) in lsp_instances.drain() {
+                    println!("App exiting: Killing LSP process...");
                     let _ = instance.child.kill();
                 }
             }

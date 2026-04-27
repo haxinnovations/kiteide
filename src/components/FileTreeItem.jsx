@@ -15,13 +15,14 @@ const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFil
   const getFileIcon = (filename) => {
     const ext = filename.split('.').pop().toLowerCase();
     const icons = {
-      js: { icon: <Code2 size={14} />, color: 'text-yellow-500' },
-      jsx: { icon: <Code2 size={14} />, color: 'text-blue-400' },
+      js: { icon: <img src="/src/assets/icons/js.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
+      jsx: { icon: <img src="/src/assets/icons/react.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
       ts: { icon: <Code2 size={14} />, color: 'text-blue-600' },
       tsx: { icon: <Code2 size={14} />, color: 'text-blue-500' },
       css: { icon: <Palette size={14} />, color: 'text-blue-500' },
       scss: { icon: <Palette size={14} />, color: 'text-pink-500' },
-      html: { icon: <Globe size={14} />, color: 'text-orange-500' },
+      html: { icon: <img src="/src/assets/icons/html.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
+      htm: { icon: <img src="/src/assets/icons/html.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
       json: { icon: <Braces size={14} />, color: 'text-yellow-600' },
       md: { icon: <FileText size={14} />, color: 'text-text-secondary' },
       png: { icon: <Image size={14} />, color: 'text-purple-500' },
@@ -29,6 +30,7 @@ const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFil
       svg: { icon: <Image size={14} />, color: 'text-orange-400' },
       toml: { icon: <Settings size={14} />, color: 'text-text-secondary' },
       yaml: { icon: <Settings size={14} />, color: 'text-text-secondary' },
+      py: { icon: <img src="/src/assets/icons/python.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
     };
     return icons[ext] || { icon: <FileText size={14} />, color: 'text-text-secondary' };
   };

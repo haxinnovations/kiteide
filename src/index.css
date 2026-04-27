@@ -138,3 +138,19 @@
 .prose p {
   @apply !leading-relaxed !mb-4;
 }
+
+/* LSP Squiggles & Code Highlighting */
+.lsp-squiggle {
+  text-decoration: underline wavy transparent 1px;
+  text-underline-offset: 2px;
+}
+.lsp-error {
+  text-decoration-color: #f85149aa; /* Added some transparency */
+}
+.lsp-warning {
+  text-decoration-color: #d29922aa; /* Added some transparency */
+}
+.html-tag {
+  color: var(--accent);
+  font-weight: 500;
+}
