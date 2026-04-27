@@ -1,149 +1,23 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { FileText, Plus, Trash2, Save, Sidebar as SidebarIcon, RefreshCw, Folder, Edit3, FolderOpen, FolderPlus, Terminal as TerminalIcon, X, ChevronRight, ChevronDown, Minus, Square, MessagesSquare, Sparkles, RotateCcw, RotateCw, Image, Code2, Globe, Palette, Braces, Settings, FileCode, Scissors, Copy, CopyPlus, Link, MapPin, ClipboardPaste, Check, MoreVertical } from 'lucide-react'
+import { Globe, Plus, Trash2, Save, Sidebar as SidebarIcon, RefreshCw, Edit3, FolderOpen, FolderPlus, Terminal as TerminalIcon, X, Minus, Square, Sparkles, RotateCcw, RotateCw, Scissors, Copy, CopyPlus, Link, MapPin, ClipboardPaste, Check, MoreVertical } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { emit, listen } from '@tauri-apps/api/event'
+import { emit } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import Terminal from './components/Terminal'
 import BrowserPanel from './components/BrowserPanel'
-import './App.css'
+import CodeEditor from './components/CodeEditor'
+import FileTreeItem from './components/FileTreeItem'
 
 const appWindow = getCurrentWindow();
-
-// Recursive File Tree Item Component
-const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFile, selectedPath, onFolderClick, clipboard }) => {
-  const [expanded, setExpanded] = useState(level === 0);
-  const [children, setChildren] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const fullPath = path ? `${path}/${file.name}` : file.name;
-
-  const getFileIcon = (filename) => {
-    const ext = filename.split('.').pop().toLowerCase();
-    if (['js', 'jsx', 'ts', 'tsx'].includes(ext)) return { icon: <Code2 size={16} />, className: 'icon-js' };
-    if (['css', 'scss', 'less'].includes(ext)) return { icon: <Palette size={16} />, className: 'icon-css' };
-    if (['html', 'htm'].includes(ext)) return { icon: <Globe size={16} />, className: 'icon-html' };
-    if (['json'].includes(ext)) return { icon: <Braces size={16} />, className: 'icon-json' };
-    if (['md'].includes(ext)) return { icon: <FileText size={16} />, className: 'icon-md' };
-    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) return { icon: <Image size={16} />, className: 'icon-image' };
-    if (['toml', 'yaml', 'yml', 'conf', 'json'].includes(ext)) return { icon: <Settings size={16} />, className: 'icon-config' };
-    return { icon: <FileText size={16} />, className: 'icon-default' };
-  };
-
-  const fetchChildren = async () => {
-    if (!file.is_dir) return;
-    setLoading(true);
-    try {
-      const result = await invoke('list_files', { dir: fullPath });
-      const sorted = result.sort((a, b) => {
-        if (a.is_dir && !b.is_dir) return -1;
-        if (!a.is_dir && b.is_dir) return 1;
-        return a.name.localeCompare(b.name);
-      });
-      setChildren(sorted);
-    } catch (error) {
-      console.error('Failed to list sub-files:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (expanded && children.length === 0) {
-      fetchChildren();
-    }
-  }, [expanded, children.length]);
-
-  useEffect(() => {
-    let unlisten;
-    const setupListener = async () => {
-      unlisten = await listen('refresh-files', () => {
-        if (expanded) fetchChildren();
-      });
-    };
-    setupListener();
-    return () => { if (unlisten) unlisten(); };
-  }, [expanded, fullPath]);
-
-  const toggleExpand = async (e) => {
-    e.stopPropagation();
-    if (!file.is_dir) {
-      onFileClick(file, path);
-      return;
-    }
-    onFolderClick(fullPath);
-    if (level === 0) return; // Keep root always open
-    const nextExpanded = !expanded;
-    setExpanded(nextExpanded);
-    if (nextExpanded) fetchChildren();
-  };
-
-  const isCutting = clipboard && clipboard.path === fullPath && clipboard.type === 'cut';
-
-  return (
-    <div className="file-tree-item-wrapper">
-      <div 
-        className={`file-item ${activeFile === fullPath ? 'active' : ''} ${selectedPath === fullPath ? 'selected' : ''} ${isCutting ? 'is-cutting' : ''}`}
-        style={{ paddingLeft: `${level * 18 + 12}px` }}
-        onClick={toggleExpand}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          if (level === 0) return;
-          onContextMenu(e, file, path);
-        }}
-      >
-        {file.is_dir ? (
-          <>
-            {level !== 0 && (expanded ? <ChevronDown size={14} className="chevron" /> : <ChevronRight size={14} className="chevron" />)}
-            <Folder size={16} className="file-icon folder" />
-          </>
-        ) : (
-          <span className={`file-icon ${getFileIcon(file.name).className}`}>
-            {getFileIcon(file.name).icon}
-          </span>
-        )}
-        <span className="file-name">{file.name}</span>
-      </div>
-      <AnimatePresence>
-        {expanded && file.is_dir && (
-          <motion.div 
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="file-children"
-          >
-            {children.map((child) => (
-              <FileTreeItem 
-                key={`${fullPath}/${child.name}`}
-                file={child}
-                path={fullPath}
-                level={level + 1}
-                onFileClick={onFileClick}
-                onContextMenu={onContextMenu}
-                activeFile={activeFile}
-                selectedPath={selectedPath}
-                onFolderClick={onFolderClick}
-                clipboard={clipboard}
-              />
-            ))}
-            {loading && <div className="loading-small" style={{ paddingLeft: `${(level + 1) * 18 + 28}px` }}>Loading...</div>}
-            {!loading && children.length === 0 && (
-              <div className="empty-small" style={{ paddingLeft: `${(level + 1) * 18 + 28}px` }}>Empty</div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
 
 function App() {
   const [currentDir, setCurrentDir] = useState(() => {
     const saved = localStorage.getItem('kite-dir')
     return (saved === 'null' || saved === 'undefined') ? null : saved
   })
-  const [files, setFiles] = useState([])
+
   const [activeFile, setActiveFile] = useState(null)
   const [selectedPath, setSelectedPath] = useState(null)
   const [content, setContent] = useState('')
@@ -163,50 +37,13 @@ function App() {
   const isResizingSidebar = useRef(false)
   const isResizingTerminal = useRef(false)
   const isResizingChat = useRef(false)
-  const lineNumbersRef = useRef(null);
-  const editorRef = useRef(null);
-  const [terminalHeight, setTerminalHeight] = useState(200);
 
-  const handleEditorScroll = (e) => {
-    const { scrollTop, scrollLeft } = e.target;
-    if (lineNumbersRef.current) {
-      lineNumbersRef.current.scrollTop = scrollTop;
-    }
-    const highlightLayer = e.target.parentElement.querySelector('.highlight-layer');
-    if (highlightLayer) {
-      highlightLayer.scrollTop = scrollTop;
-      highlightLayer.scrollLeft = scrollLeft;
-    }
-  }
-
-  // Keyboard Shortcuts
-  useEffect(() => {
-    const handleGlobalKeyDown = (e) => {
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === 's') {
-          e.preventDefault();
-          handleSave();
-        } else if (e.key === 'o') {
-          e.preventDefault();
-          handleOpenFolder();
-        }
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [content, activeFile]); // Dependencies ensure we have latest content/file
 
   const fetchFiles = async (dir = currentDir) => {
     if (!dir || dir === 'null') return
     setLoading(true)
     try {
-      const result = await invoke('list_files', { dir })
-      const sorted = result.sort((a, b) => {
-        if (a.is_dir && !b.is_dir) return -1
-        if (!a.is_dir && b.is_dir) return 1
-        return a.name.localeCompare(b.name)
-      })
-      setFiles(sorted)
+      await invoke('list_files', { dir })
       await emit('refresh-files', {});
     } catch (error) {
       console.error('Failed to list files:', error)
@@ -218,16 +55,16 @@ function App() {
   // Initialize CSS Variables from localStorage or defaults
   useEffect(() => {
     const savedSidebarWidth = localStorage.getItem('kite-sidebar-width') || '260px';
-    const savedTerminalHeight = localStorage.getItem('kite-terminal-height') || '250px';
     const savedChatWidth = localStorage.getItem('kite-chat-width') || '300px';
+    const savedTerminalHeight = localStorage.getItem('kite-terminal-height') || '250px';
     document.documentElement.style.setProperty('--sidebar-width', savedSidebarWidth);
-    document.documentElement.style.setProperty('--terminal-height', savedTerminalHeight);
     document.documentElement.style.setProperty('--chat-width', savedChatWidth);
+    document.documentElement.style.setProperty('--terminal-height', savedTerminalHeight);
   }, []);
 
   useEffect(() => {
     if (currentDir && currentDir !== 'null') {
-      fetchFiles()
+      setTimeout(() => fetchFiles(), 0)
       localStorage.setItem('kite-dir', currentDir)
     }
     // Global click-away listener for all menus
@@ -284,6 +121,7 @@ function App() {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDir])
 
   const handleOpenFolder = async () => {
@@ -329,9 +167,8 @@ function App() {
       console.log(`Writing file to: ${currentDir}/${name}`);
       await invoke('save_note', { dir: currentDir, title: name, content });
       
-      // Refresh the file list
-      const updatedFiles = await invoke('read_dir', { path: currentDir });
-      setFiles(updatedFiles);
+      // Refresh the file list using the unified helper
+      await fetchFiles();
       console.log('File created and sidebar refreshed');
     } catch (err) {
       console.error('Failed to create file:', err);
@@ -630,186 +467,7 @@ function App() {
     setContextMenu(null)
   }
 
-  const handleKeyDown = (e) => {
-    const textarea = e.target;
-    const { selectionStart, selectionEnd, value } = textarea;
 
-    // 1. Bracket/Quote Completion
-    const isHTML = activeFile?.endsWith('.html') || activeFile?.endsWith('.htm');
-    const pairs = {
-      '(': ')',
-      '[': ']',
-      '{': '}',
-      '"': '"',
-      "'": "'",
-      '`': '`'
-    };
-    
-    // Only auto-complete < if NOT in an HTML file
-    if (!isHTML) {
-      pairs['<'] = '>';
-    }
-
-    if (pairs[e.key]) {
-      e.preventDefault();
-      const pair = pairs[e.key];
-      const before = value.substring(0, selectionStart);
-      const after = value.substring(selectionEnd);
-      
-      const newValue = before + e.key + pair + after;
-      
-      // Force DOM update
-      textarea.value = newValue;
-      textarea.selectionStart = textarea.selectionEnd = selectionStart + 1;
-      
-      // Sync State
-      setContent(newValue);
-      return;
-    }
-
-    // 2. Auto-Indentation on Enter
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      
-      const charBefore = value[selectionStart - 1];
-      const charAfter = value[selectionStart];
-      
-      // Find current line's indentation
-      const lastNewLine = value.lastIndexOf('\n', selectionStart - 1);
-      const lineStart = lastNewLine === -1 ? 0 : lastNewLine + 1;
-      const currentLine = value.substring(lineStart, selectionStart);
-      const indentMatch = currentLine.match(/^\s*/);
-      const currentIndent = indentMatch ? indentMatch[0] : '';
-      
-      let newValue = '';
-      let newPos = 0;
-
-      // Case A: Expansion between brackets or HTML tags
-      const isBetweenBrackets = (charBefore === '{' && charAfter === '}') ||
-                                (charBefore === '[' && charAfter === ']') ||
-                                (charBefore === '(' && charAfter === ')');
-      const isBetweenTags = charBefore === '>' && charAfter === '<';
-
-      if (isBetweenBrackets || isBetweenTags) {
-        const indentLevel = currentIndent + '\t';
-        newValue = value.substring(0, selectionStart) + '\n' + indentLevel + '\n' + currentIndent + value.substring(selectionEnd);
-        newPos = selectionStart + 1 + indentLevel.length;
-      } else {
-        // Case B: Simple new line with indentation
-        let nextIndent = currentIndent;
-        const trimmedLine = currentLine.trim();
-        
-        // Indent after brackets, colons, or opening HTML tags
-        const isOpeningTag = trimmedLine.startsWith('<') && !trimmedLine.startsWith('</') && trimmedLine.endsWith('>') && !trimmedLine.endsWith('/>');
-        
-        if (trimmedLine.endsWith('{') || trimmedLine.endsWith('[') || trimmedLine.endsWith('(') || trimmedLine.endsWith(':') || isOpeningTag) {
-          nextIndent += '\t';
-        }
-        newValue = value.substring(0, selectionStart) + '\n' + nextIndent + value.substring(selectionEnd);
-        newPos = selectionStart + 1 + nextIndent.length;
-      }
-      
-      // Force DOM update
-      textarea.value = newValue;
-      textarea.selectionStart = textarea.selectionEnd = newPos;
-      
-      // Sync State
-      setContent(newValue);
-      return;
-    }
-
-    // 3. Tab Handling (Insert a Tab)
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const before = value.substring(0, selectionStart);
-      const after = value.substring(selectionEnd);
-      const newValue = before + '\t' + after;
-      
-      textarea.value = newValue;
-      textarea.selectionStart = textarea.selectionEnd = selectionStart + 1;
-      
-      setContent(newValue);
-      return;
-    }
-
-    // 4. HTML Auto-Closing Tags
-    if (e.key === '>' && (activeFile?.endsWith('.html') || activeFile?.endsWith('.htm'))) {
-      const VOID_ELEMENTS = [
-        'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 
-        'link', 'meta', 'param', 'source', 'track', 'wbr'
-      ];
-      
-      const before = value.substring(0, selectionStart);
-      const lastOpen = before.lastIndexOf('<');
-      
-      // Check if we're inside a tag and it's not already closed
-      if (lastOpen !== -1 && lastOpen > before.lastIndexOf('>')) {
-        const tagContent = before.substring(lastOpen + 1);
-        const tagNameMatch = tagContent.match(/^([a-zA-Z0-9]+)/);
-        
-        if (tagNameMatch) {
-          const tagName = tagNameMatch[1];
-          if (!VOID_ELEMENTS.includes(tagName.toLowerCase())) {
-            e.preventDefault();
-            const after = value.substring(selectionEnd);
-            const newValue = before + '>' + '</' + tagName + '>' + after;
-            
-            textarea.value = newValue;
-            textarea.selectionStart = textarea.selectionEnd = selectionStart + 1;
-            setContent(newValue);
-            return;
-          }
-        }
-      }
-    }
-
-    // 5. Smart Typing: : (add space)
-    if (e.key === ':') {
-      e.preventDefault();
-      const before = value.substring(0, selectionStart);
-      const after = value.substring(selectionEnd);
-      const newValue = before + ': ' + after;
-      textarea.value = newValue;
-      textarea.selectionStart = textarea.selectionEnd = selectionStart + 2;
-      setContent(newValue);
-      return;
-    }
-
-    // 6. Smart Typing: ; (new line)
-    if (e.key === ';') {
-      e.preventDefault();
-      
-      // Find current indentation
-      const lastNewLine = value.lastIndexOf('\n', selectionStart - 1);
-      const lineStart = lastNewLine === -1 ? 0 : lastNewLine + 1;
-      const currentLine = value.substring(lineStart, selectionStart);
-      const indentMatch = currentLine.match(/^\s*/);
-      const currentIndent = indentMatch ? indentMatch[0] : '';
-      
-      const before = value.substring(0, selectionStart);
-      const after = value.substring(selectionEnd);
-      const newValue = before + ';\n' + currentIndent + after;
-      
-      textarea.value = newValue;
-      textarea.selectionStart = textarea.selectionEnd = selectionStart + 2 + currentIndent.length;
-      setContent(newValue);
-      return;
-    }
-  }
-
-  const highlightContent = (text) => {
-    if (!activeFile?.endsWith('.html') && !activeFile?.endsWith('.htm')) return text;
-    
-    // Escape HTML special chars to prevent injection and show literal characters
-    let escaped = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-      
-    // Highlight tags: &lt;...&gt;
-    // We target the entire tag including brackets
-    return escaped.replace(/(&lt;\/?[a-zA-Z0-9]+.*?&gt;)/g, '<span class="html-tag">$1</span>');
-  };
 
   const handleMinimize = () => invoke('minimize_window');
   const handleMaximize = () => invoke('toggle_maximize');
@@ -842,83 +500,93 @@ function App() {
     document.body.style.cursor = 'col-resize';
   };
 
-  return (
-    <div className="app-container">
-      {/* Premium Custom Title Bar */}
-      <div className="custom-title-bar" onMouseDown={handleDrag}>
-        <div className="title-bar-left">
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 's') {
+          e.preventDefault();
+          handleSave();
+        } else if (e.key === 'o') {
+          e.preventDefault();
+          handleOpenFolder();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content, activeFile]); // Dependencies ensure we have latest content/file
 
-          <div className="title-bar-menu">
-            <div className="menu-container">
+  return (
+    <div className="w-full flex flex-col h-screen bg-bg-primary text-text-primary overflow-hidden font-sans selection:bg-accent/20">
+      {/* Title Bar */}
+      <div 
+        className="h-10 flex items-center justify-between px-3 bg-bg-primary border-b border-border select-none flex-shrink-0 drag-region"
+        onMouseDown={handleDrag}
+      >
+        <div className="flex items-center gap-4 no-drag">
+          <div className="flex items-center gap-1">
+            {/* File Menu */}
+            <div className="relative">
               <button 
-                className={`menu-btn ${menu === 'file' ? 'active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setMenu(menu === 'file' ? null : 'file');
-                }}
+                className={`px-3 py-1 text-[11px] font-medium rounded-custom transition-all ${menu === 'file' ? 'bg-bg-secondary text-accent shadow-sm' : 'hover:bg-bg-secondary text-text-secondary hover:text-text-primary'}`}
+                onClick={(e) => { e.stopPropagation(); setMenu(menu === 'file' ? null : 'file'); }}
               >
                 File
               </button>
               <AnimatePresence>
                 {menu === 'file' && (
                   <motion.div 
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -5 }}
-                    className="menu-dropdown"
+                    initial={{ opacity: 0, y: 4, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 4, scale: 0.95 }}
+                    className="absolute top-full left-0 mt-1 w-48 bg-bg-primary border border-border rounded-lg shadow-2xl z-50 py-1 flex flex-col"
                   >
-                    <button onClick={handleOpenFolder}>
-                      <FolderOpen size={14} />
+                    <button onClick={() => { handleOpenFolder(); setMenu(null); }} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary text-text-primary transition-colors text-left group">
+                      <FolderOpen size={14} className="text-text-secondary group-hover:text-accent transition-colors" /> 
                       <span>Open Folder</span>
-                      <span className="shortcut-label">Ctrl+O</span>
+                      <span className="ml-auto opacity-30 text-[10px]">Ctrl+O</span>
                     </button>
-                    <button onClick={createNote}>
-                      <Plus size={14} />
+                    <button onClick={() => { createNote(); setMenu(null); }} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary text-text-primary transition-colors text-left group">
+                      <Plus size={14} className="text-text-secondary group-hover:text-accent transition-colors" /> 
                       <span>New File</span>
-                      <span className="shortcut-label">Ctrl+N</span>
+                      <span className="ml-auto opacity-30 text-[10px]">Ctrl+N</span>
                     </button>
-                    <button onClick={handleSave}>
-                      <Save size={14} />
+                    <div className="h-[1px] bg-border my-1 mx-2" />
+                    <button onClick={() => { handleSave(); setMenu(null); }} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary text-text-primary transition-colors text-left group">
+                      <Save size={14} className="text-text-secondary group-hover:text-accent transition-colors" /> 
                       <span>Save File</span>
-                      <span className="shortcut-label">Ctrl+S</span>
+                      <span className="ml-auto opacity-30 text-[10px]">Ctrl+S</span>
                     </button>
-                    <div className="menu-divider" />
-                    <button onClick={handleClose}>
-                      <X size={14} />
-                      <span>Exit</span>
+                    <div className="h-[1px] bg-border my-1 mx-2" />
+                    <button onClick={() => { handleClose(); setMenu(null); }} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-red-50 text-red-600 transition-colors text-left group">
+                      <X size={14} /> <span>Exit</span>
                     </button>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
 
-            <div className="menu-container">
+            {/* Edit Menu */}
+            <div className="relative">
               <button 
-                className={`menu-btn ${menu === 'edit' ? 'active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setMenu(menu === 'edit' ? null : 'edit');
-                }}
+                className={`px-3 py-1 text-[11px] font-medium rounded-custom transition-all ${menu === 'edit' ? 'bg-bg-secondary text-accent shadow-sm' : 'hover:bg-bg-secondary text-text-secondary hover:text-text-primary'}`}
+                onClick={(e) => { e.stopPropagation(); setMenu(menu === 'edit' ? null : 'edit'); }}
               >
                 Edit
               </button>
               <AnimatePresence>
                 {menu === 'edit' && (
                   <motion.div 
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -5 }}
-                    className="menu-dropdown"
+                    initial={{ opacity: 0, y: 4, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 4, scale: 0.95 }}
+                    className="absolute top-full left-0 mt-1 w-48 bg-bg-primary border border-border rounded-lg shadow-2xl z-50 py-1 flex flex-col"
                   >
-                    <button onClick={() => { document.execCommand('undo'); setMenu(null); }}>
-                      <RotateCcw size={14} />
-                      <span>Undo</span>
-                      <span className="shortcut-label">Ctrl+Z</span>
+                    <button onClick={() => { document.execCommand('undo'); setMenu(null); }} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary text-text-primary transition-colors text-left group">
+                      <RotateCcw size={14} className="text-text-secondary group-hover:text-accent transition-colors" /> <span>Undo</span>
+                      <span className="ml-auto opacity-30 text-[10px]">Ctrl+Z</span>
                     </button>
-                    <button onClick={() => { document.execCommand('redo'); setMenu(null); }}>
-                      <RotateCw size={14} />
-                      <span>Redo</span>
-                      <span className="shortcut-label">Ctrl+Y</span>
+                    <button onClick={() => { document.execCommand('redo'); setMenu(null); }} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary text-text-primary transition-colors text-left group">
+                      <RotateCw size={14} className="text-text-secondary group-hover:text-accent transition-colors" /> <span>Redo</span>
+                      <span className="ml-auto opacity-30 text-[10px]">Ctrl+Y</span>
                     </button>
                   </motion.div>
                 )}
@@ -926,91 +594,74 @@ function App() {
             </div>
 
 
-            <div className="menu-container">
+            {/* View Menu */}
+            <div className="relative">
               <button 
-                className={`menu-btn ${menu === 'view' ? 'active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setMenu(menu === 'view' ? null : 'view');
-                }}
+                className={`px-3 py-1 text-[11px] font-medium rounded-custom transition-all ${menu === 'view' ? 'bg-bg-secondary text-accent shadow-sm' : 'hover:bg-bg-secondary text-text-secondary hover:text-text-primary'}`}
+                onClick={(e) => { e.stopPropagation(); setMenu(menu === 'view' ? null : 'view'); }}
               >
                 View
               </button>
               <AnimatePresence>
                 {menu === 'view' && (
                   <motion.div 
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -5 }}
-                    className="menu-dropdown"
+                    initial={{ opacity: 0, y: 4, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 4, scale: 0.95 }}
+                    className="absolute top-full left-0 mt-1 w-48 bg-bg-primary border border-border rounded-lg shadow-2xl z-50 py-1 flex flex-col"
                   >
-                    <button onClick={() => { setSidebarOpen(!sidebarOpen); setMenu(null); }}>
-                      <span className="menu-check">{sidebarOpen && <Check size={14} />}</span>
-                      <SidebarIcon size={14} />
-                      <span>File Explorer</span>
+                    <button onClick={() => { setSidebarOpen(!sidebarOpen); setMenu(null); }} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary text-text-primary transition-colors text-left group">
+                      <span className="w-4 flex justify-center text-accent">{sidebarOpen && <Check size={12} />}</span> 
+                      <SidebarIcon size={14} className="text-text-secondary transition-colors group-hover:text-accent" /> <span>Sidebar</span>
                     </button>
-                    <button onClick={() => { setTerminalOpen(!terminalOpen); setMenu(null); }}>
-                      <span className="menu-check">{terminalOpen && <Check size={14} />}</span>
-                      <TerminalIcon size={14} />
-                      <span>Terminal</span>
+                    <button onClick={() => { setTerminalOpen(!terminalOpen); setMenu(null); }} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary text-text-primary transition-colors text-left group">
+                      <span className="w-4 flex justify-center text-accent">{terminalOpen && <Check size={12} />}</span> 
+                      <TerminalIcon size={14} className="text-text-secondary transition-colors group-hover:text-accent" /> <span>Terminal</span>
                     </button>
-                    <div className="menu-divider" />
-                    <button onClick={() => { setBrowserOpen(!browserOpen); setMenu(null); }}>
-                      <span className="menu-check">{browserOpen && <Check size={14} />}</span>
-                      <Sparkles size={14} />
-                      <span>Gemini Assistant</span>
+                    <div className="h-[1px] bg-border my-1 mx-2" />
+                    <button onClick={() => { setBrowserOpen(!browserOpen); setMenu(null); }} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary text-text-primary transition-colors text-left group">
+                      <span className="w-4 flex justify-center text-accent">{browserOpen && <Check size={12} />}</span> 
+                      <Sparkles size={14} className="text-text-secondary transition-colors group-hover:text-accent" /> <span>Gemini</span>
                     </button>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
-            <button className="menu-btn disabled">Help</button>
+            <button className="px-3 py-1 text-[11px] font-medium text-text-secondary/30 cursor-not-allowed">Help</button>
           </div>
         </div>
         
-        <div className="title-bar-center">
-          <img src="/kiteicon.png" alt="" className="title-bar-logo" />
-          <span className="window-title">{title || 'Kite IDE'}</span>
+        <div className="flex items-center gap-2 absolute left-1/2 -translate-x-1/2 opacity-70 pointer-events-none">
+          <img src="/kiteicon.png" alt="" className="w-4 h-4 opacity-80" />
+          <span className="text-[11px] font-bold tracking-tight uppercase text-text-secondary">{title || 'Kite IDE'}</span>
         </div>
 
-        <div className="title-bar-right">
-          <button className="window-control-btn" onClick={handleMinimize} title="Minimize">
-            <Minus size={14} />
-          </button>
-          <button className="window-control-btn" onClick={handleMaximize} title="Maximize">
-            <Square size={12} />
-          </button>
-          <button className="window-control-btn close" onClick={handleClose} title="Close">
-            <X size={14} />
-          </button>
+        <div className="flex items-center no-drag">
+          <button className="p-2 hover:bg-bg-secondary transition-colors text-text-secondary hover:text-text-primary" onClick={handleMinimize} title="Minimize"><Minus size={14} /></button>
+          <button className="p-2 hover:bg-bg-secondary transition-colors text-text-secondary hover:text-text-primary" onClick={handleMaximize} title="Maximize"><Square size={10} /></button>
+          <button className="p-2 hover:bg-red-500 transition-colors text-text-secondary hover:text-white" onClick={handleClose} title="Close"><X size={14} /></button>
         </div>
       </div>
 
-      <div className="workspace-layout">
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        {/* Sidebar */}
         <AnimatePresence>
           {sidebarOpen && (
-            <>
+            <div className="flex h-full flex-shrink-0 relative group">
               <motion.div 
                 initial={{ width: 0, opacity: 0 }}
                 animate={{ width: 'var(--sidebar-width)', opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }}
-                className="sidebar"
+                className="h-full bg-bg-primary border-r border-border flex flex-col overflow-hidden"
               >
-                <div className="sidebar-header">
-                  <div className="sidebar-actions">
-                    <button onClick={createNote} title="New File" className="action-btn">
-                      <Plus size={16} />
-                    </button>
-                    <button onClick={createNewFolder} title="New Folder" className="action-btn">
-                      <FolderPlus size={16} />
-                    </button>
-                    <button onClick={() => fetchFiles()} title="Refresh" className="action-btn">
-                      <RefreshCw size={16} className={loading ? 'spinning' : ''} />
-                    </button>
+                <div className="h-9 px-3 border-b border-border flex items-center justify-between bg-bg-secondary/30">
+                  <span className="text-[10px] font-bold tracking-widest text-text-secondary uppercase">Explorer</span>
+                  <div className="flex items-center gap-0.5">
+                    <button onClick={createNote} className="p-1 hover:bg-bg-secondary rounded transition-colors text-text-secondary hover:text-accent" title="New File"><Plus size={14} /></button>
+                    <button onClick={createNewFolder} className="p-1 hover:bg-bg-secondary rounded transition-colors text-text-secondary hover:text-accent" title="New Folder"><FolderPlus size={14} /></button>
+                    <button onClick={() => fetchFiles()} className="p-1 hover:bg-bg-secondary rounded transition-colors text-text-secondary hover:text-accent" title="Refresh"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
                   </div>
                 </div>
 
-                <div className="file-list">
+                <div className="flex-1 overflow-y-auto py-2">
                   {currentDir ? (
                     <FileTreeItem 
                       file={{ name: getDirName(currentDir), is_dir: true }}
@@ -1024,53 +675,57 @@ function App() {
                       clipboard={clipboard}
                     />
                   ) : (
-                    <div className="no-workspace">
-                      <FolderOpen size={32} className="no-workspace-icon" />
-                      <p>No workspace selected</p>
-                      <button onClick={handleOpenFolder} className="btn-primary-sm">Open Folder</button>
+                    <div className="h-full flex flex-col items-center justify-center p-6 text-center space-y-4 opacity-50">
+                      <FolderOpen size={48} className="text-text-secondary/30" />
+                      <p className="text-xs text-text-secondary leading-relaxed">No project directory<br/>selected</p>
+                      <button onClick={handleOpenFolder} className="px-4 py-2 bg-accent text-white rounded-xl text-xs font-bold shadow-md hover:opacity-90 active:scale-95 transition-all">Open Folder</button>
                     </div>
                   )}
                 </div>
               </motion.div>
-              {/* Sidebar Resizer */}
-              <div className="resizer-v" onMouseDown={startResizingSidebar} />
-            </>
+              {/* Resizer */}
+              <div 
+                className="absolute right-0 top-0 bottom-0 w-[3px] cursor-col-resize hover:bg-accent/30 transition-colors z-10 active:bg-accent"
+                onMouseDown={startResizingSidebar}
+              />
+            </div>
           )}
         </AnimatePresence>
 
-        <div className="main-content">
-          <header className="top-bar">
-            <div className="left-group">
+        <div className="flex-1 flex flex-col min-w-0 bg-bg-primary overflow-hidden relative min-h-0">
+          <header className="h-10 flex items-center justify-between px-4 border-b border-border bg-bg-primary/50 backdrop-blur-md z-20 flex-shrink-0">
+            <div className="flex items-center gap-4 min-w-0">
               <button 
                 onClick={() => setSidebarOpen(!sidebarOpen)} 
-                className={`icon-toggle ${sidebarOpen ? 'active' : ''}`}
+                className={`p-1.5 rounded-lg transition-all ${sidebarOpen ? 'text-accent bg-accent/10' : 'text-text-secondary hover:bg-bg-secondary'}`}
                 title={sidebarOpen ? "Close Sidebar" : "Open Sidebar"}
               >
-                <SidebarIcon size={18} />
+                <SidebarIcon size={16} />
               </button>
-              <div className="breadcrumb">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-secondary overflow-hidden whitespace-nowrap">
                 {getBreadcrumbs().map((crumb, i) => (
-                  <span key={i} className="breadcrumb-item">
-                    <span className={`breadcrumb-segment ${crumb.isLast ? 'is-last' : ''}`}>
+                  <div key={i} className="flex items-center gap-1.5 shrink-0">
+                    <span className={`transition-colors ${crumb.isLast ? 'text-text-primary font-bold' : 'hover:text-text-primary cursor-default'}`}>
                       {crumb.name}
                     </span>
-                    {!crumb.isLast && <span className="breadcrumb-separator">/</span>}
-                  </span>
+                    {!crumb.isLast && <span className="opacity-30">/</span>}
+                  </div>
                 ))}
               </div>
             </div>
             
-            <div className="right-group">
+            <div className="flex items-center gap-2">
               {activeFile && (
                 <button 
                   onClick={handleSave} 
-                  className={`save-btn ${saving ? 'saving' : ''}`}
+                  className={`flex items-center gap-2 px-3 py-1 rounded-custom text-[11px] font-bold transition-all shadow-sm ${saving ? 'bg-accent/50 cursor-wait' : 'bg-accent hover:opacity-90 active:scale-95 text-white'}`}
                   disabled={saving}
                 >
-                  <Save size={16} />
+                  <Save size={14} className={saving ? 'animate-pulse' : ''} />
                   <span>{saving ? 'Saving...' : 'Save'}</span>
                 </button>
               )}
+              <div className="w-[1px] h-4 bg-border mx-1" />
               <button 
                 onClick={() => {
                   if (!terminalOpen && terminals.length === 0) {
@@ -1079,57 +734,40 @@ function App() {
                     setTerminalOpen(!terminalOpen);
                   }
                 }}
-                className={`icon-toggle ${terminalOpen ? 'active' : ''}`}
+                className={`p-1.5 rounded-lg transition-all ${terminalOpen ? 'text-accent bg-accent/10' : 'text-text-secondary hover:bg-bg-secondary'}`}
                 title="Toggle Terminal"
               >
-                <TerminalIcon size={18} />
+                <TerminalIcon size={16} />
               </button>
               <button 
                 onClick={() => setBrowserOpen(!browserOpen)}
-                className={`icon-toggle ${browserOpen ? 'active' : ''}`}
+                className={`p-1.5 rounded-lg transition-all ${browserOpen ? 'text-accent bg-accent/10' : 'text-text-secondary hover:bg-bg-secondary'}`}
                 title="Toggle Gemini Assistant"
               >
-                <Sparkles size={18} />
+                <Sparkles size={16} />
               </button>
             </div>
           </header>
 
-          <div className="editor-wrapper">
-            <div className="editor-content-area">
+          <div className="flex-1 relative overflow-hidden grid grid-rows-[1fr_auto] min-h-0">
+            <div className="overflow-hidden min-h-0">
               {activeFile ? (
-                <div className="editor-with-lines">
-                  <div className="line-numbers" ref={lineNumbersRef}>
-                    {content.split('\n').map((_, i) => (
-                      <div key={i + 1} className="line-number">{i + 1}</div>
-                    ))}
-                  </div>
-                  <div className="editor-container">
-                    <div 
-                      className="highlight-layer"
-                      dangerouslySetInnerHTML={{ __html: highlightContent(content) + '\n' }}
-                    />
-                    <textarea
-                      ref={editorRef}
-                      className="editor-textarea"
-                      value={content}
-                      onChange={(e) => setContent(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      onScroll={handleEditorScroll}
-                      placeholder="Start typing..."
-                      spellCheck="false"
-                      wrap="off"
-                    />
-                  </div>
-                </div>
+                <CodeEditor 
+                  activeFile={activeFile}
+                  content={content}
+                  setContent={setContent}
+                />
               ) : (
-                <div className="editor-placeholder">
-                  <div className="placeholder-content">
-                    <img src="/kiteicon.png" alt="Kite Logo" className="placeholder-logo-img" />
-                    <h1>Welcome to Kite IDE</h1>
-                    <p>Select a file from the sidebar or create a new one to get started.</p>
+                <div className="h-full flex flex-col items-center justify-center p-12 text-center bg-radial-at-t from-bg-secondary/20 to-transparent">
+                  <div className="max-w-md space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                    <img src="/kiteicon.png" alt="Kite Logo" className="w-20 h-20 mx-auto opacity-20 grayscale brightness-200" />
+                    <div className="space-y-2">
+                      <h1 className="text-2xl font-bold tracking-tight text-text-primary">Welcome to Kite IDE</h1>
+                      <p className="text-sm text-text-secondary leading-relaxed">The AI-first workspace. Select a file from the explorer or create a new project to start building.</p>
+                    </div>
                     {!currentDir && (
-                      <button onClick={handleOpenFolder} className="btn-primary">
-                        Open Folder
+                      <button onClick={handleOpenFolder} className="px-6 py-2.5 bg-accent text-white rounded-xl text-sm font-bold shadow-xl shadow-accent/20 hover:opacity-90 active:scale-95 transition-all">
+                        Open Workspace
                       </button>
                     )}
                   </div>
@@ -1137,170 +775,145 @@ function App() {
               )}
             </div>
 
-            {/* Persistent Terminal Panel */}
-            <div className={`terminal-resizer-container ${terminalOpen ? 'visible' : 'hidden'}`}>
-              <div className="resizer-h" onMouseDown={startResizingTerminal} />
-              <motion.div 
-                animate={{ height: terminalOpen ? 'var(--terminal-height)' : 0 }}
-                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                className="terminal-panel"
-                style={{ overflow: 'hidden' }}
-              >
-                <div className="terminal-header">
-                  <div className="terminal-tabs">
-                    {terminals.map((term) => (
-                      <div 
-                        key={term.id} 
-                        className={`terminal-tab ${activeTerminalId === term.id ? 'active' : ''}`}
-                        onClick={() => setActiveTerminalId(term.id)}
-                      >
-                        <TerminalIcon size={12} />
-                        <span>{term.title}</span>
-                        <button 
-                          className="tab-options-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            setTerminalMenu({ id: term.id, x: rect.left, y: rect.bottom });
-                          }}
-                        >
-                          <MoreVertical size={12} />
-                        </button>
-                      </div>
-                    ))}
-                    <button className="add-terminal-btn" onClick={addTerminal}>
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                  <div className="terminal-actions">
-                    <button onClick={() => setTerminalOpen(false)} className="terminal-close-btn">
-                      <X size={14} />
-                    </button>
-                  </div>
-                </div>
-                <div className="terminal-body">
-                  {terminalMenu && (
-                    <>
-                      <div 
-                        className="menu-backdrop" 
-                        onMouseDown={() => setTerminalMenu(null)}
-                        onContextMenu={(e) => { e.preventDefault(); setTerminalMenu(null); }}
-                      />
-                      <div 
-                        className="terminal-tab-menu"
-                        style={{ position: 'fixed', top: terminalMenu.y + 5, left: terminalMenu.x, zIndex: 1000 }}
-                        onClick={(e) => e.stopPropagation()}
-                        onMouseDown={(e) => e.stopPropagation()}
-                      >
-                        <button onClick={() => renameTerminal(terminalMenu.id)}>
-                          <Edit3 size={14} />
-                          Rename
-                        </button>
-                        <button 
-                          onClick={() => removeTerminal(null, terminalMenu.id)}
-                          className="delete"
-                        >
-                          <Trash2 size={14} />
-                          Kill Terminal
-                        </button>
-                      </div>
-                    </>
-                  )}
+          <div className={`relative z-30 flex-shrink-0 ${terminalOpen ? 'block' : 'hidden'}`}>
+            <div 
+              className="absolute top-0 left-0 right-0 h-1 cursor-row-resize hover:bg-accent/30 transition-colors z-50 active:bg-accent"
+              onMouseDown={startResizingTerminal} 
+            />
+            <motion.div 
+              initial={false}
+              animate={{ height: terminalOpen ? 'var(--terminal-height)' : 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="bg-bg-primary border-t border-border flex flex-col overflow-hidden"
+              style={{ height: terminalOpen ? 'var(--terminal-height)' : 0 }}
+            >
+              <div className="h-9 px-3 flex items-center justify-between bg-bg-secondary/30 shrink-0">
+                <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
                   {terminals.map((term) => (
-                    <div 
+                    <button 
                       key={term.id} 
-                      style={{ 
-                        display: activeTerminalId === term.id ? 'block' : 'none',
-                        width: '100%',
-                        height: '100%'
-                      }}
+                      className={`flex items-center gap-2 px-3 py-1 text-[11px] font-bold rounded-t-lg transition-all border-x border-t border-transparent whitespace-nowrap ${activeTerminalId === term.id ? 'bg-bg-primary border-border text-accent shadow-[0_-2px_10px_-3px_rgba(var(--accent-rgb),0.2)]' : 'text-text-secondary hover:text-text-primary'}`}
+                      onClick={() => setActiveTerminalId(term.id)}
                     >
-                      <Terminal currentDir={currentDir} id={term.id} />
-                    </div>
+                      <TerminalIcon size={12} />
+                      <span>{term.title}</span>
+                      <div 
+                        className="p-0.5 hover:bg-bg-secondary rounded transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setTerminalMenu({ id: term.id, x: rect.left, y: rect.bottom });
+                        }}
+                      >
+                        <MoreVertical size={10} />
+                      </div>
+                    </button>
                   ))}
+                  <button className="p-1 text-text-secondary hover:text-accent hover:bg-bg-secondary rounded transition-all" onClick={addTerminal}>
+                    <Plus size={14} />
+                  </button>
                 </div>
-              </motion.div>
-            </div>
+                <button onClick={() => setTerminalOpen(false)} className="p-1 text-text-secondary hover:text-red-500 transition-colors">
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="flex-1 relative bg-bg-primary min-h-0 overflow-hidden">
+                {terminalMenu && (
+                  <div className="fixed inset-0 z-[100]" onMouseDown={() => setTerminalMenu(null)}>
+                    <div 
+                      className="absolute bg-bg-primary border border-border rounded-lg shadow-2xl py-1 w-40 overflow-hidden"
+                      style={{ top: terminalMenu.y + 5, left: terminalMenu.x }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <button onClick={() => renameTerminal(terminalMenu.id)} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary text-text-primary transition-colors text-left"><Edit3 size={14} className="text-text-secondary" /> Rename</button>
+                      <button onClick={() => removeTerminal(null, terminalMenu.id)} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-red-50 text-red-600 transition-colors text-left"><Trash2 size={14} /> Kill Terminal</button>
+                    </div>
+                  </div>
+                )}
+                {terminals.map((term) => (
+                  <div key={term.id} className={`absolute inset-0 ${activeTerminalId === term.id ? 'block' : 'hidden'}`}>
+                    <Terminal currentDir={currentDir} id={term.id} />
+                  </div>
+                ))}
+              </div>
+            </motion.div>
           </div>
         </div>
+      </div>
 
+      {/* Gemini Sidebar */}
         <AnimatePresence>
           {browserOpen && (
-            <>
-              <div className="resizer-v" onMouseDown={startResizingChat} />
+            <div className="flex h-full flex-shrink-0 relative group">
+              <div 
+                className="absolute left-0 top-0 bottom-0 w-[3px] cursor-col-resize hover:bg-accent/30 transition-colors z-10 active:bg-accent"
+                onMouseDown={startResizingChat} 
+              />
               <motion.div 
                 initial={{ width: 0, opacity: 0 }}
                 animate={{ width: 'var(--chat-width)', opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }}
-                className="sidebar-right"
+                className="h-full bg-bg-primary border-l border-border overflow-hidden"
               >
                 <BrowserPanel 
                   onClose={() => setBrowserOpen(false)} 
                   activeFile={activeFile ? { name: title, content: content } : null}
                   onApplyEdits={handleApplyEdits}
                   onCreateFile={handleCreateFile}
+                  onRefresh={() => fetchFiles()}
+                  projectDir={currentDir}
                 />
               </motion.div>
-            </>
+            </div>
           )}
         </AnimatePresence>
       </div>
 
-      {contextMenu && (
-        <div 
-          className="context-menu" 
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button onClick={handleCut}>
-            <Scissors size={14} />
-            Cut
-          </button>
-          <button onClick={handleCopy}>
-            <Copy size={14} />
-            Copy
-          </button>
-          <button onClick={handlePaste} disabled={!clipboard}>
-            <ClipboardPaste size={14} />
-            Paste
-          </button>
-          <button onClick={() => handleDuplicate(contextMenu.fullPath)}>
-            <CopyPlus size={14} />
-            Duplicate
-          </button>
-          <div className="menu-divider" />
-          <button onClick={() => copyToClipboard(contextMenu.fullPath)}>
-            <MapPin size={14} />
-            Copy Absolute Path
-          </button>
-          <button onClick={() => copyToClipboard(getRelativePath(contextMenu.fullPath))}>
-            <Link size={14} />
-            Copy Relative Path
-          </button>
-          <div className="menu-divider" />
-          {(contextMenu.fileName.toLowerCase().endsWith('.html') || contextMenu.fileName.toLowerCase().endsWith('.htm')) && (
-            <button onClick={async () => {
-              try {
-                await invoke('open_in_browser', { path: contextMenu.fullPath });
-                setContextMenu(null);
-              } catch (err) {
-                console.error('Failed to open with browser:', err);
-              }
-            }}>
-              <Globe size={14} />
-              Open with web browser
-            </button>
-          )}
-          <button onClick={handleRename}>
-            <Edit3 size={14} />
-            Rename
-          </button>
-          <button onClick={handleDelete} className="delete">
-            <Trash2 size={14} />
-            Delete
-          </button>
-        </div>
-      )}
+      {/* Global Context Menu */}
+      <AnimatePresence>
+        {contextMenu && (
+          <>
+            <div className="fixed inset-0 z-[1000]" onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed z-[1001] w-56 bg-bg-primary/95 backdrop-blur-xl border border-border rounded-xl shadow-2xl py-1.5 flex flex-col overflow-hidden"
+              style={{ top: contextMenu.y, left: contextMenu.x }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button onClick={handleCut} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-bg-secondary text-text-primary transition-all"><Scissors size={14} className="text-text-secondary" /> <span>Cut</span> <span className="ml-auto opacity-30 text-[10px]">Ctrl+X</span></button>
+              <button onClick={handleCopy} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-bg-secondary text-text-primary transition-all"><Copy size={14} className="text-text-secondary" /> <span>Copy</span> <span className="ml-auto opacity-30 text-[10px]">Ctrl+C</span></button>
+              <button onClick={handlePaste} disabled={!clipboard} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-bg-secondary text-text-primary transition-all disabled:opacity-30"><ClipboardPaste size={14} className="text-text-secondary" /> <span>Paste</span> <span className="ml-auto opacity-30 text-[10px]">Ctrl+V</span></button>
+              <button onClick={() => handleDuplicate(contextMenu.fullPath)} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-bg-secondary text-text-primary transition-all"><CopyPlus size={14} className="text-text-secondary" /> <span>Duplicate</span></button>
+              
+              <div className="h-[1px] bg-border my-1.5 mx-2" />
+              
+              <button onClick={() => copyToClipboard(contextMenu.fullPath)} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-bg-secondary text-text-primary transition-all"><MapPin size={14} className="text-text-secondary" /> <span>Copy Absolute Path</span></button>
+              <button onClick={() => copyToClipboard(getRelativePath(contextMenu.fullPath))} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-bg-secondary text-text-primary transition-all"><Link size={14} className="text-text-secondary" /> <span>Copy Relative Path</span></button>
+              
+              <div className="h-[1px] bg-border my-1.5 mx-2" />
+              
+              {(contextMenu.fileName.toLowerCase().endsWith('.html') || contextMenu.fileName.toLowerCase().endsWith('.htm')) && (
+                <button 
+                  onClick={async () => {
+                    try {
+                      await invoke('open_in_browser', { path: contextMenu.fullPath });
+                      setContextMenu(null);
+                    } catch (err) { console.error('Failed to open with browser:', err); }
+                  }}
+                  className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-bg-secondary text-text-primary transition-all"
+                >
+                  <Globe size={14} className="text-text-secondary" /> <span>Open in Browser</span>
+                </button>
+              )}
+              <button onClick={handleRename} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-bg-secondary text-text-primary transition-all"><Edit3 size={14} className="text-text-secondary" /> <span>Rename</span></button>
+              <button onClick={handleDelete} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-red-50 text-red-600 transition-all font-bold"><Trash2 size={14} /> <span>Delete</span></button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

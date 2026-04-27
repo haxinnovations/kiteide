@@ -20,10 +20,10 @@ const Terminal = ({ currentDir, id }) => {
     // Initialize xterm
     const term = new XTerm({
       theme: {
-        background: '#ffffff',
-        foreground: '#000000',
-        cursor: '#000000',
-        selectionBackground: '#dcdcdc',
+        background: getComputedStyle(document.documentElement).getPropertyValue('--bg-primary').trim() || '#ffffff',
+        foreground: getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#000000',
+        cursor: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#000000',
+        selectionBackground: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() + '33' || '#dcdcdc',
         black: '#000000',
         red: '#cd3131',
         green: '#008700',
@@ -41,8 +41,8 @@ const Terminal = ({ currentDir, id }) => {
         brightCyan: '#000000',
         brightWhite: '#000000'
       },
-      fontSize: 13,
-      fontFamily: '"JetBrains Mono", monospace',
+      fontSize: 12,
+      fontFamily: '"JetBrains Mono", "Fira Code", monospace',
       cursorBlink: true,
       allowProposedApi: true,
     });
@@ -57,10 +57,19 @@ const Terminal = ({ currentDir, id }) => {
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Trigger initial fit
-    setTimeout(() => {
-      fitAddon.fit();
-    }, 100);
+    // Trigger initial fit and wait for custom fonts to load
+    const doFit = () => {
+      if (fitAddonRef.current && terminalRef.current && terminalRef.current.offsetWidth > 0) {
+        fitAddonRef.current.fit();
+      }
+    };
+
+    setTimeout(doFit, 100);
+    setTimeout(doFit, 500); // Fallback for slower loads
+    
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(doFit);
+    }
 
     // Spawn backend terminal with ID
     console.log(`Requesting terminal spawn for ${id} in:`, currentDir);
@@ -69,20 +78,22 @@ const Terminal = ({ currentDir, id }) => {
       term.write('\r\n\x1b[31mError spawning terminal: ' + err + '\x1b[0m\r\n');
     });
 
-    // Resize handling with initialization delay
-    const initTime = Date.now();
+    // Resize handling with stabilization
+    let resizeTimer;
     const resizeObserver = new ResizeObserver(() => {
-      // Don't resize for the first 500ms to allow shell to stabilize
-      if (Date.now() - initTime < 500) return;
-
       if (fitAddonRef.current && terminalRef.current && terminalRef.current.offsetWidth > 0) {
+        // Immediate frontend fit for visual responsiveness
         fitAddonRef.current.fit();
-        const dims = fitAddonRef.current.proposeDimensions();
-        if (dims && dims.rows > 0 && dims.cols > 0) {
-          console.log(`Resizing terminal ${id} to:`, dims);
-          invoke('resize_terminal', { id, rows: dims.rows, cols: dims.cols })
-            .catch(err => console.error('Resize Error:', err));
-        }
+        
+        // Debounce backend resize to avoid process thrashing
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          const dims = fitAddonRef.current.proposeDimensions();
+          if (dims && dims.rows > 0 && dims.cols > 0) {
+            invoke('resize_terminal', { id, rows: dims.rows, cols: dims.cols })
+              .catch(err => console.error('Resize Error:', err));
+          }
+        }, 100);
       }
     });
 
@@ -90,7 +101,9 @@ const Terminal = ({ currentDir, id }) => {
 
     // Listen for unique backend output for this ID
     const unlistenPromise = listen(`terminal-output-${id}`, (event) => {
-      term.write(event.payload);
+      term.write(event.payload, () => {
+        term.scrollToBottom();
+      });
     });
 
     // Handle user input with ID
@@ -106,18 +119,13 @@ const Terminal = ({ currentDir, id }) => {
       // Tell backend to close this specific terminal
       invoke('close_terminal', { id }).catch(e => console.error('Close error:', e));
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   return (
     <div 
       ref={terminalRef} 
-      className="terminal-container"
-      style={{ 
-        width: '100%', 
-        height: '100%', 
-        backgroundColor: '#ffffff',
-        padding: '0'
-      }} 
+      className="w-full h-full bg-bg-primary overflow-hidden pl-3 pt-1 pb-2" 
     />
   );
 };

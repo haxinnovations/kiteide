@@ -23,8 +23,10 @@ struct TerminalState {
 
 #[tauri::command]
 fn save_note(dir: String, title: String, content: String) -> Result<String, String> {
-    // Join exactly what the user typed (with space replacement)
     let path = PathBuf::from(dir).join(title.replace(" ", "_"));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     fs::write(&path, content).map_err(|e| e.to_string())?;
     Ok(format!("Saved to {:?}", path))
 }
@@ -80,7 +82,7 @@ fn rename_file(dir: String, old_name: String, new_name: String) -> Result<String
 #[tauri::command]
 fn create_dir(dir: String, name: String) -> Result<String, String> {
     let path = PathBuf::from(dir).join(name);
-    fs::create_dir(path).map_err(|e| e.to_string())?;
+    fs::create_dir_all(path).map_err(|e| e.to_string())?;
     Ok("Directory created".to_string())
 }
 
