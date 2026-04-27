@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Globe, Plus, Trash2, Save, Sidebar as SidebarIcon, RefreshCw, Edit3, FolderOpen, FolderPlus, Terminal as TerminalIcon, X, Minus, Square, Sparkles, RotateCcw, RotateCw, Scissors, Copy, CopyPlus, Link, MapPin, ClipboardPaste, Check, MoreVertical } from 'lucide-react'
+import { Globe, Plus, Trash2, Save, Sidebar as SidebarIcon, RefreshCw, Edit3, FolderOpen, FolderPlus, Terminal as TerminalIcon, X, Minus, Square, Sparkles, RotateCcw, RotateCw, Scissors, Copy, CopyPlus, Link, MapPin, ClipboardPaste, Check, MoreVertical, Palette } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { emit } from '@tauri-apps/api/event'
@@ -36,6 +36,13 @@ function App() {
   const [terminalMenu, setTerminalMenu] = useState(null); // { id, x, y }
   const [renamingPath, setRenamingPath] = useState(null)
   const [creatingItem, setCreatingItem] = useState(null) // { parentPath, type }
+  const [showThemeModal, setShowThemeModal] = useState(false)
+  const [theme, setTheme] = useState(() => localStorage.getItem('kite-theme') || 'light')
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('kite-theme', theme);
+  }, [theme]);
 
   const isResizingSidebar = useRef(false)
   const isResizingTerminal = useRef(false)
@@ -646,6 +653,29 @@ function App() {
                 )}
               </AnimatePresence>
             </div>
+
+            {/* Settings Menu */}
+            <div className="relative">
+              <button 
+                className={`px-3 py-1 text-[11px] font-medium rounded-custom transition-all ${menu === 'settings' ? 'bg-bg-secondary text-accent shadow-sm' : 'hover:bg-bg-secondary text-text-secondary hover:text-text-primary'}`}
+                onClick={(e) => { e.stopPropagation(); setMenu(menu === 'settings' ? null : 'settings'); }}
+              >
+                Settings
+              </button>
+              <AnimatePresence>
+                {menu === 'settings' && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 4, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 4, scale: 0.95 }}
+                    className="absolute top-full left-0 mt-1 w-48 bg-bg-primary border border-border rounded-lg shadow-2xl z-50 py-1 flex flex-col"
+                  >
+                    <button onClick={() => { setShowThemeModal(true); setMenu(null); }} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-secondary text-text-primary transition-colors text-left group">
+                      <Palette size={14} className="text-text-secondary group-hover:text-accent transition-colors" /> 
+                      <span>Color Themes</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
             <button className="px-3 py-1 text-[11px] font-medium text-text-secondary/30 cursor-not-allowed">Help</button>
           </div>
         </div>
@@ -858,7 +888,7 @@ function App() {
                 )}
                 {terminals.map((term) => (
                   <div key={term.id} className={`absolute inset-0 ${activeTerminalId === term.id ? 'block' : 'hidden'}`}>
-                    <Terminal currentDir={currentDir} id={term.id} />
+                    <Terminal currentDir={currentDir} id={term.id} theme={theme} />
                   </div>
                 ))}
               </div>
@@ -937,6 +967,88 @@ function App() {
               <button onClick={handleDelete} className="flex items-center gap-2.5 px-3 py-2 text-xs hover:bg-red-50 text-red-600 transition-all font-bold"><Trash2 size={14} /> <span>Delete</span></button>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Theme Modal Overlay */}
+      <AnimatePresence>
+        {showThemeModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-sm"
+            onClick={() => setShowThemeModal(false)}
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-bg-primary border border-border w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-bg-secondary/30">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-accent/10 rounded-xl text-accent">
+                    <Palette size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-bold text-text-primary">Color Themes</h2>
+                    <p className="text-[11px] text-text-secondary">Personalize your workspace</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowThemeModal(false)}
+                  className="p-2 hover:bg-bg-secondary rounded-full transition-colors text-text-secondary"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-6">
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Light Theme */}
+                  <button 
+                    onClick={() => setTheme('light')}
+                    className={`flex flex-col gap-3 p-4 rounded-xl border-2 transition-all text-left ${theme === 'light' ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50 bg-bg-secondary/30'}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="w-8 h-8 rounded-lg bg-white border border-gray-200 shadow-sm" />
+                      {theme === 'light' && <Check size={16} className="text-accent" />}
+                    </div>
+                    <div>
+                      <span className="text-[13px] font-bold text-text-primary">Light</span>
+                      <p className="text-[10px] text-text-secondary">Clean and bright</p>
+                    </div>
+                  </button>
+
+                  {/* Dark Theme */}
+                  <button 
+                    onClick={() => setTheme('dark')}
+                    className={`flex flex-col gap-3 p-4 rounded-xl border-2 transition-all text-left ${theme === 'dark' ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50 bg-bg-secondary/30'}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="w-8 h-8 rounded-lg bg-[#0d1117] border border-gray-800 shadow-sm" />
+                      {theme === 'dark' && <Check size={16} className="text-accent" />}
+                    </div>
+                    <div>
+                      <span className="text-[13px] font-bold text-text-primary">Dark</span>
+                      <p className="text-[10px] text-text-secondary">Easy on the eyes</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="px-6 py-4 bg-bg-secondary/30 border-t border-border flex justify-end">
+                <button 
+                  onClick={() => setShowThemeModal(false)}
+                  className="px-4 py-2 bg-accent text-white rounded-xl text-xs font-bold shadow-md hover:opacity-90 active:scale-95 transition-all"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

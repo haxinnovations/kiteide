@@ -7,11 +7,66 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
 import '@xterm/xterm/css/xterm.css';
 
-const Terminal = ({ currentDir, id }) => {
+const Terminal = ({ currentDir, id, theme }) => {
   const terminalRef = useRef(null);
   const xtermRef = useRef(null);
   const fitAddonRef = useRef(null);
   const hasSpawned = useRef(false);
+
+  const getTerminalTheme = (themeName) => {
+    if (themeName === 'dark') {
+      return {
+        background: '#0d1117',
+        foreground: '#e6edf3',
+        cursor: '#2f81f7',
+        selectionBackground: 'rgba(47, 129, 247, 0.3)',
+        black: '#484f58',
+        red: '#ff7b72',
+        green: '#3fb950',
+        yellow: '#d29922',
+        blue: '#58a6ff',
+        magenta: '#bc8cff',
+        cyan: '#39c5cf',
+        white: '#b1bac4',
+        brightBlack: '#6e7681',
+        brightRed: '#ffa198',
+        brightGreen: '#56d364',
+        brightYellow: '#e3b341',
+        brightBlue: '#79c0ff',
+        brightMagenta: '#d2a8ff',
+        brightCyan: '#56d4dd',
+        brightWhite: '#ffffff'
+      };
+    }
+    return {
+      background: '#ffffff',
+      foreground: '#1f2328',
+      cursor: '#0969da',
+      selectionBackground: 'rgba(9, 105, 218, 0.2)',
+      black: '#24292f',
+      red: '#cf222e',
+      green: '#1a7f37',
+      yellow: '#9a6700',
+      blue: '#0969da',
+      magenta: '#8250df',
+      cyan: '#1b7c83',
+      white: '#6e7681',
+      brightBlack: '#57606a',
+      brightRed: '#a40e26',
+      brightGreen: '#116329',
+      brightYellow: '#4d2d00',
+      brightBlue: '#0550ae',
+      brightMagenta: '#6639ba',
+      brightCyan: '#055d64',
+      brightWhite: '#24292f'
+    };
+  };
+
+  useEffect(() => {
+    if (xtermRef.current) {
+      xtermRef.current.options.theme = getTerminalTheme(theme);
+    }
+  }, [theme]);
 
   useEffect(() => {
     if (!terminalRef.current || hasSpawned.current || !id) return;
@@ -19,28 +74,7 @@ const Terminal = ({ currentDir, id }) => {
 
     // Initialize xterm
     const term = new XTerm({
-      theme: {
-        background: getComputedStyle(document.documentElement).getPropertyValue('--bg-primary').trim() || '#ffffff',
-        foreground: getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#000000',
-        cursor: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#000000',
-        selectionBackground: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() + '33' || '#dcdcdc',
-        black: '#000000',
-        red: '#cd3131',
-        green: '#008700',
-        yellow: '#000000',
-        blue: '#0451a5',
-        magenta: '#bc05bc',
-        cyan: '#000000',
-        white: '#555555',
-        brightBlack: '#000000',
-        brightRed: '#cd3131',
-        brightGreen: '#14a314',
-        brightYellow: '#000000',
-        brightBlue: '#0451a5',
-        brightMagenta: '#bc05bc',
-        brightCyan: '#000000',
-        brightWhite: '#000000'
-      },
+      theme: getTerminalTheme(theme),
       fontSize: 12,
       fontFamily: '"JetBrains Mono", "Fira Code", monospace',
       cursorBlink: true,

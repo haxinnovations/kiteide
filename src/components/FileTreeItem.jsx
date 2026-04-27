@@ -51,11 +51,10 @@ const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFil
     }
   };
 
-  useEffect(() => {
-    if (creatingItem && creatingItem.parentPath === fullPath && !expanded) {
-      setExpanded(true);
-    }
-  }, [creatingItem, fullPath, expanded]);
+  // Update state during render if props changed (replaces useEffect for cascading renders)
+  if (creatingItem && creatingItem.parentPath === fullPath && !expanded) {
+    setExpanded(true);
+  }
 
   useEffect(() => {
     if (expanded && children.length === 0) {

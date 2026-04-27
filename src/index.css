@@ -3,6 +3,7 @@
 @import "tailwindcss";
 
 :root {
+  /* Default to Light Theme */
   --bg-primary: #ffffff;
   --bg-secondary: #f6f8fa;
   --bg-tertiary: #eff1f3;
@@ -19,6 +20,32 @@
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
   --radius: 6px;
+}
+
+[data-theme='light'] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-tertiary: #eff1f3;
+  --accent: #0969da;
+  --accent-hover: #085cc1;
+  --accent-muted: rgba(9, 105, 218, 0.08);
+  --text-primary: #1f2328;
+  --text-secondary: #656d76;
+  --text-muted: #8c959f;
+  --border: #d0d7de;
+}
+
+[data-theme='dark'] {
+  --bg-primary: #0d1117;
+  --bg-secondary: #010409;
+  --bg-tertiary: #161b22;
+  --accent: #2f81f7;
+  --accent-hover: #388bfd;
+  --accent-muted: rgba(47, 129, 247, 0.15);
+  --text-primary: #e6edf3;
+  --text-secondary: #7d8590;
+  --text-muted: #484f58;
+  --border: #30363d;
 }
 
 @theme {
@@ -58,17 +85,20 @@
     -webkit-app-region: no-drag;
   }
 
-  .custom-scrollbar::-webkit-scrollbar {
+  .custom-scrollbar::-webkit-scrollbar,
+  .prose pre::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
 
-  .custom-scrollbar::-webkit-scrollbar-track {
+  .custom-scrollbar::-webkit-scrollbar-track,
+  .prose pre::-webkit-scrollbar-track {
     @apply bg-transparent;
   }
 
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    @apply bg-border/50 rounded-full border-2 border-transparent bg-clip-padding hover:bg-border;
+  .custom-scrollbar::-webkit-scrollbar-thumb,
+  .prose pre::-webkit-scrollbar-thumb {
+    @apply bg-text-secondary/30 rounded-full border-2 border-transparent bg-clip-padding hover:bg-text-secondary/50;
   }
 
   .no-scrollbar::-webkit-scrollbar {

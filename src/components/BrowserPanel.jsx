@@ -634,7 +634,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-0 scroll-smooth">
+      <div className="flex-1 overflow-y-auto space-y-0 scroll-smooth custom-scrollbar">
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center opacity-30 py-12 px-6">
             <Sparkles size={48} className="mb-4 text-accent animate-pulse" />
@@ -839,7 +839,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
       </div>
 
       {/* Input Area */}
-      <div className="px-6 pb-6">
+      <div className="px-6 pb-6 pt-4 border-t border-border/10 bg-bg-primary">
         <div className="max-w-3xl mx-auto space-y-3">
           {/* Header Controls */}
           <div className="flex items-center justify-between px-0 h-6">
@@ -885,7 +885,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               placeholder={mode === 'agent' ? "How can I help you build today?" : "Ask Gemini anything..."}
-              className="w-full bg-transparent px-0 py-5 pr-12 text-[14px] leading-relaxed focus:outline-none resize-none min-h-[100px] max-h-[400px] placeholder:text-text-secondary/30 text-text-primary"
+              className="w-full bg-transparent px-0 py-5 pr-12 text-[14px] leading-relaxed focus:outline-none resize-none min-h-[100px] max-h-[400px] placeholder:text-text-secondary/30 text-text-primary custom-scrollbar"
               rows={1}
               disabled={loading}
             />
