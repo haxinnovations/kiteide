@@ -46,21 +46,55 @@ struct FileItem {
     is_dir: bool,
 }
 
+#[derive(serde::Serialize)]
+struct ListFilesResult {
+    items: Vec<FileItem>,
+    truncated: bool,
+    total: usize,
+}
+
 #[tauri::command]
-fn list_files(dir: String) -> Result<Vec<FileItem>, String> {
-    let paths = fs::read_dir(dir).map_err(|e| e.to_string())?;
+fn list_files(dir: String) -> Result<ListFilesResult, String> {
+    let paths = fs::read_dir(&dir).map_err(|e| e.to_string())?;
     let mut items = Vec::new();
+    let ignore_list = ["node_modules", ".git", ".tauri", "target", "dist", ".next", ".vscode", ".idea"];
+    
     for path in paths {
         let path = path.map_err(|e| e.to_string())?.path();
-        let is_dir = path.is_dir();
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if ignore_list.contains(&name) {
+                continue;
+            }
+            let is_dir = path.is_dir();
             items.push(FileItem {
                 name: name.to_string(),
                 is_dir,
             });
         }
     }
-    Ok(items)
+
+    // Sort in Rust (much faster than JS)
+    items.sort_by(|a, b| {
+        if a.is_dir && !b.is_dir {
+            std::cmp::Ordering::Less
+        } else if !a.is_dir && b.is_dir {
+            std::cmp::Ordering::Greater
+        } else {
+            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+        }
+    });
+
+    let total = items.len();
+    let truncated = total > 1000;
+    if truncated {
+        items.truncate(1000);
+    }
+
+    Ok(ListFilesResult {
+        items,
+        truncated,
+        total,
+    })
 }
 
 #[tauri::command]

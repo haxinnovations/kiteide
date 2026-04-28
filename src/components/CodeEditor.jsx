@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useMemo } from 'react';
 
 const CodeEditor = ({ content, setContent, activeFile, diagnostics = [] }) => {
   const lineNumbersRef = useRef(null);
@@ -11,19 +11,27 @@ const CodeEditor = ({ content, setContent, activeFile, diagnostics = [] }) => {
     }
   };
 
-  const highlightContent = (text) => {
-    if (!text) return '';
-    const diags = diagnostics || [];
-    if (diags.length > 0) {
-      console.log(`[Editor] Rendering ${diags.length} diagnostics`);
-    }
+  // Group diagnostics by line for O(1) lookup during highlighting
+  const diagnosticsByLine = useMemo(() => {
+    const map = new Map();
+    if (!diagnostics) return map;
+    diagnostics.forEach(diag => {
+      const line = diag.range.start.line;
+      if (!map.has(line)) map.set(line, []);
+      map.get(line).push(diag);
+    });
+    return map;
+  }, [diagnostics]);
+
+  const highlightedHTML = useMemo(() => {
+    if (!content) return '';
     
-    const lines = text.split('\n');
+    const lines = content.split('\n');
     const isHTML = activeFile?.endsWith('.html') || activeFile?.endsWith('.htm');
     
     const highlightedLines = lines.map((line, lineIdx) => {
       let escapedLine = '';
-      const lineDiags = diagnostics.filter(d => d.range.start.line === lineIdx);
+      const lineDiags = diagnosticsByLine.get(lineIdx) || [];
       
       // Sort diagnostics by start character
       const sortedDiags = [...lineDiags].sort((a, b) => a.range.start.character - b.range.start.character);
@@ -43,7 +51,6 @@ const CodeEditor = ({ content, setContent, activeFile, diagnostics = [] }) => {
         if (diagIdx < sortedDiags.length && sortedDiags[diagIdx].range.end.character === currentChar) {
           escapedLine += '</span>';
           diagIdx++;
-          // Check if another diagnostic starts at the same spot
           continue; 
         }
         
@@ -56,12 +63,10 @@ const CodeEditor = ({ content, setContent, activeFile, diagnostics = [] }) => {
         currentChar++;
       }
       
-      // Close any open diagnostic at end of line
       if (diagIdx < sortedDiags.length && sortedDiags[diagIdx].range.start.character < line.length) {
           escapedLine += '</span>';
       }
 
-      // Simple tag highlighting for HTML
       if (isHTML) {
         escapedLine = escapedLine.replace(/(&lt;\/?[a-zA-Z0-9]+.*?&gt;)/g, '<span class="html-tag">$1</span>');
       }
@@ -70,7 +75,10 @@ const CodeEditor = ({ content, setContent, activeFile, diagnostics = [] }) => {
     });
     
     return highlightedLines.join('\n');
-  };
+  }, [content, diagnosticsByLine, activeFile]);
+
+  const lineCount = useMemo(() => (content || '').split('\n').length, [content]);
+
 
   const handleKeyDown = (e) => {
     const textarea = e.target;
@@ -242,7 +250,7 @@ const CodeEditor = ({ content, setContent, activeFile, diagnostics = [] }) => {
   return (
     <div className="h-full flex items-stretch">
       <div className="w-12 bg-bg-primary border-r border-border/50 flex flex-col items-center pt-4 select-none shrink-0" ref={lineNumbersRef}>
-        {(content || '').split('\n').map((_, i) => (
+        {Array.from({ length: lineCount }).map((_, i) => (
           <div key={i + 1} className="text-[11px] leading-6 font-mono text-text-secondary/30 h-6">{i + 1}</div>
         ))}
       </div>
@@ -253,7 +261,7 @@ const CodeEditor = ({ content, setContent, activeFile, diagnostics = [] }) => {
         <div className="relative min-h-full min-w-full inline-block">
           <div 
             className="p-4 font-mono text-[13px] leading-6 whitespace-pre pointer-events-none highlight-layer"
-            dangerouslySetInnerHTML={{ __html: highlightContent(content) + '\n' }}
+            dangerouslySetInnerHTML={{ __html: highlightedHTML + '\n' }}
           />
           <textarea
             ref={editorRef}

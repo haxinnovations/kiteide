@@ -1,27 +1,50 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Sparkles, X, Loader2, FileCode, Check, Zap, FilePlus, Settings, Trash2, Key, ChevronDown, History, Terminal as TerminalIcon, Copy, ListTodo, CheckCircle2, Circle, ArrowUp, Bug, RotateCcw, Square } from 'lucide-react'
+import { Sparkles, X, Loader2, FileCode, Check, Zap, FilePlus, Settings, Trash2, ChevronDown, History, Terminal as TerminalIcon, Copy, ListTodo, CheckCircle2, Circle, ArrowUp, Bug, RotateCcw, Square } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import ReactMarkdown from 'react-markdown'
 
-const BrowserPanel = ({ onClose, activeFile, onApplyEdits, onCreateFile, onRefresh, projectDir }) => {
-  const models = [
-    'gemini-2.5-flash-lite',
-    'gemini-2.5-flash',
-    'gemini-flash-lite-latest',
-    'gemini-flash-latest',
-    'gemini-pro-latest',
-    'gemini-2.5-pro',
-    'gemini-3.1-flash-lite-preview',
-    'gemini-3.1-pro-preview',
-    'gemini-3-flash-preview'
-  ];
+const BrowserPanel = ({ onClose, activeFile, onApplyEdits, onCreateFile, onRefresh, projectDir, activeTerminalId }) => {
+  const providers = {
+    'Gemini': [
+      { id: 'gemini-3.1-pro-preview', name: '3.1 Pro' },
+      { id: 'gemini-3.1-flash-lite-preview', name: '3.1 Flash Lite' },
+      { id: 'gemini-3-flash-preview', name: '3 Flash' },
+      { id: 'gemini-2.5-flash-lite', name: '2.5 Flash Lite' },
+      { id: 'gemini-2.5-flash', name: '2.5 Flash' },
+      { id: 'gemini-2.5-pro', name: '2.5 Pro' },
+    ],
+    'OpenAI': [
+      { id: 'gpt-5.5-2026-04-23', name: 'GPT-5.5' },
+      { id: 'gpt-5.5-pro-2026-04-23', name: 'GPT-5.5 Pro' },
+      { id: 'gpt-5.4-2026-03-05', name: 'GPT-5.4' },
+      { id: 'gpt-5.4-pro-2026-03-05', name: 'GPT-5.4 Pro' },
+      { id: 'gpt-5.4-mini-2026-03-17', name: 'GPT-5.4 Mini' },
+      { id: 'gpt-5.4-nano-2026-03-17', name: 'GPT-5.4 Nano' },
+      { id: 'gpt-5.2-2025-12-11', name: 'GPT-5.2' },
+      { id: 'gpt-5.2-pro-2025-12-11', name: 'GPT-5.2 Pro' },
+      { id: 'gpt-5.1-2025-11-13', name: 'GPT-5.1' },
+      { id: 'gpt-5-2025-08-07', name: 'GPT-5' },
+      { id: 'gpt-5-pro-2025-10-06', name: 'GPT-5 Pro' },
+      { id: 'gpt-5-mini-2025-08-07', name: 'GPT-5 Mini' },
+      { id: 'gpt-5-nano-2025-08-07', name: 'GPT-5 Nano' },
+    ],
+  };
 
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini-api-key') || '');
-  const [tempApiKey, setTempApiKey] = useState(apiKey);
+  const providerNames = Object.keys(providers);
+
+  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('gemini-api-key') || '');
+  const [openaiApiKey, setOpenaiApiKey] = useState(() => localStorage.getItem('openai-api-key') || '');
+  const [tempGeminiKey, setTempGeminiKey] = useState(geminiApiKey);
+  const [tempOpenaiKey, setTempOpenaiKey] = useState(openaiApiKey);
+  const [selectedProvider, setSelectedProvider] = useState(() => {
+    return localStorage.getItem('kite-selected-provider') || 'Gemini';
+  });
   const [selectedModel, setSelectedModel] = useState(() => {
     const saved = localStorage.getItem('gemini-selected-model');
-    return (saved && models.includes(saved)) ? saved : 'gemini-2.5-flash';
+    const provider = localStorage.getItem('kite-selected-provider') || 'Gemini';
+    const availableModels = providers[provider] || providers['Gemini'];
+    return (saved && availableModels.some(m => m.id === saved)) ? saved : availableModels[0].id;
   });
   const [contextLimit, setContextLimit] = useState(() => parseInt(localStorage.getItem('gemini-context-limit')) || 10);
   const [showSettings, setShowSettings] = useState(false);
@@ -44,10 +67,16 @@ const BrowserPanel = ({ onClose, activeFile, onApplyEdits, onCreateFile, onRefre
   const isCapturing = useRef(false);
   const captureTimeout = useRef(null);
 
-  // Sync temp key when settings open
+  // Active API key based on selected provider
+  const apiKey = selectedProvider === 'OpenAI' ? openaiApiKey : geminiApiKey;
+
+  // Sync temp keys when settings open
   useEffect(() => {
-    if (showSettings) setTempApiKey(apiKey);
-  }, [showSettings, apiKey]);
+    if (showSettings) {
+      setTempGeminiKey(geminiApiKey);
+      setTempOpenaiKey(openaiApiKey);
+    }
+  }, [showSettings, geminiApiKey, openaiApiKey]);
 
   // Save state to localStorage
   useEffect(() => {
@@ -55,16 +84,30 @@ const BrowserPanel = ({ onClose, activeFile, onApplyEdits, onCreateFile, onRefre
   }, [messages]);
 
   useEffect(() => {
-    localStorage.setItem('gemini-api-key', apiKey);
-  }, [apiKey]);
+    localStorage.setItem('gemini-api-key', geminiApiKey);
+  }, [geminiApiKey]);
+
+  useEffect(() => {
+    localStorage.setItem('openai-api-key', openaiApiKey);
+  }, [openaiApiKey]);
 
   useEffect(() => {
     localStorage.setItem('gemini-selected-model', selectedModel);
   }, [selectedModel]);
 
   useEffect(() => {
+    localStorage.setItem('kite-selected-provider', selectedProvider);
+  }, [selectedProvider]);
+
+  useEffect(() => {
     localStorage.setItem('gemini-context-limit', contextLimit);
   }, [contextLimit]);
+
+  const handleProviderChange = (newProvider) => {
+    setSelectedProvider(newProvider);
+    const models = providers[newProvider] || [];
+    setSelectedModel(models[0]?.id || '');
+  };
 
   // Scroll to bottom
   const scrollToBottom = (smooth = true) => {
@@ -104,35 +147,31 @@ const BrowserPanel = ({ onClose, activeFile, onApplyEdits, onCreateFile, onRefre
     setShowSettings(false);
   };
 
-  const handleSaveApiKey = () => {
-    setApiKey(tempApiKey);
-    localStorage.setItem('gemini-api-key', tempApiKey);
+  const handleSaveApiKeys = () => {
+    setGeminiApiKey(tempGeminiKey);
+    setOpenaiApiKey(tempOpenaiKey);
     setShowSettings(false);
   };
 
-  const handleRetry = useCallback(() => {
-    if (messages.length === 0 || loading) return;
-    
-    // Find last assistant message
-    const lastAssistantIdx = [...messages].reverse().findIndex(m => m.role === 'assistant');
-    if (lastAssistantIdx === -1) return;
-    
-    const actualIdx = messages.length - 1 - lastAssistantIdx;
-    const historyBeforeAssistant = messages.slice(0, actualIdx);
-    const lastUserMessage = historyBeforeAssistant[historyBeforeAssistant.length - 1];
-    
-    if (!lastUserMessage || lastUserMessage.role !== 'user') return;
 
-    // Remove assistant message and its triggering user message
-    // handleSend will re-add the user message
-    const baseHistory = historyBeforeAssistant.slice(0, -1);
-    setMessages(baseHistory);
-    
-    // Use a small timeout to ensure state has updated or handleSend uses the right base
-    setTimeout(() => {
-      handleSend(lastUserMessage.content, baseHistory, 0);
-    }, 0);
-  }, [messages, loading]);
+  const runCommand = useCallback(async (cmd) => {
+    try {
+      isCapturing.current = true;
+      terminalBuffer.current = '';
+      // On Windows PowerShell, \r is often more reliable than \n
+      await invoke('write_to_terminal', { id: activeTerminalId || 'default', data: cmd + '\r' });
+      
+      // Trigger a refresh of the file explorer since the command might have changed the FS
+      if (onRefresh) {
+        // We wait a bit because terminal execution is async in the shell
+        setTimeout(() => onRefresh(), 300);
+        setTimeout(() => onRefresh(), 1000); // Second refresh for slower operations
+      }
+    } catch (err) {
+      console.error("Failed to run command:", err);
+      isCapturing.current = false;
+    }
+  }, [activeTerminalId, onRefresh]);
 
   const handleSend = useCallback(async (manualPrompt, overrideHistory = null, retryCount = 0) => {
     if (!apiKey) {
@@ -208,45 +247,73 @@ For listing files: include a 'listFiles' string (the path to list).
 - For viewing tasks: include a 'viewTasks' boolean (set to true to see the roadmap).
 - For terminal commands: include a 'commands' array of strings.
 Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": null, "readFile": null, "viewTasks": false, "commands": [], "tasks": [], "taskCompleted": null}`
-        : `You are the native Kite AI Assistant. Return your response strictly as a JSON object. 
+        : `You are the native Kite AI Agent. Return your response strictly as a JSON object. 
 PROJECT ENVIRONMENT:
 - Active Directory: ${projectDir || 'Not specified'}
 - DIRECTORY CREATION: If you want to create a file in a directory that does not exist, you MUST first create that folder using a terminal command (e.g., "mkdir -p src/components").
 - FILE EXISTENCE: Before creating a new file, you MUST check if it already exists using 'listFiles' if the directory context is not already present in the chat.
-CRITICAL: All code content in 'replacement', 'content', or 'commands' MUST be properly JSON-escaped. Especially double quotes must be escaped as \\".
-- For edits: include an 'edits' array with {'startLine', 'endLine', 'replacement'}. 
+CRITICAL: All code content in 'replacement', 'content', or 'commands' MUST be properly JSON-escaped. Especially double quotes must be escaped as".
+- For edits: include an 'edits' array with {'file', 'startLine', 'endLine', 'replacement'}. 
 - For new files: include a 'newFile' object with {'name', 'content'}. 
-For terminal commands: include a 'commands' array of strings.
+- For terminal commands: include a 'commands' array of strings.
 Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": null, "readFile": null, "commands": []}`;
 
       // Trim history based on contextLimit (excluding the current prompt which is added manually)
       const historyToKeep = newMessages.slice(0, -1).slice(-contextLimit);
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: [
-            ...historyToKeep.map(m => ({
-              role: m.role === 'assistant' ? 'model' : 'user',
-              parts: [{ text: m.content || " " }]
-            })),
-            { role: 'user', parts: [{ text: prompt || " " }] }
-          ],
-          system_instruction: {
-            parts: [{ text: systemInstruction }]
+      let response, data, responseText;
+
+      if (selectedProvider === 'OpenAI') {
+        // OpenAI Chat Completions API
+        response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
           },
-          generationConfig: {
-            response_mime_type: "application/json"
-          }
-        })
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error?.message || 'API request failed');
-
-      let responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: [
+              { role: 'system', content: systemInstruction },
+              ...historyToKeep.map(m => ({
+                role: m.role === 'assistant' ? 'assistant' : 'user',
+                content: m.content || ' '
+              })),
+              { role: 'user', content: prompt || ' ' }
+            ],
+            response_format: { type: 'json_object' }
+          })
+        });
+        data = await response.json();
+        if (!response.ok) throw new Error(data.error?.message || 'API request failed');
+        responseText = data.choices?.[0]?.message?.content || '';
+      } else {
+        // Gemini API (default)
+        response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [
+              ...historyToKeep.map(m => ({
+                role: m.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: m.content || " " }]
+              })),
+              { role: 'user', parts: [{ text: prompt || " " }] }
+            ],
+            system_instruction: {
+              parts: [{ text: systemInstruction }]
+            },
+            generationConfig: {
+              response_mime_type: "application/json"
+            }
+          })
+        });
+        data = await response.json();
+        if (!response.ok) throw new Error(data.error?.message || 'API request failed');
+        responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      }
       
       try {
         let jsonCandidate = responseText.trim();
@@ -318,8 +385,9 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
             try {
               const resolvedDir = resolvePath(assistantMessage.listFiles);
               const results = await invoke('list_files', { dir: resolvedDir });
-              const summary = (results || []).map(f => `${f.is_dir ? '[DIR]' : '[FILE]'} ${f.name}`).join('\n');
-              toolResults.push(`### Directory contents of ${assistantMessage.listFiles}:\n${summary || '(Empty directory)'}`);
+              const fileItems = results.items || [];
+              const summary = fileItems.map(f => `${f.is_dir ? '[DIR]' : '[FILE]'} ${f.name}`).join('\n');
+              toolResults.push(`### Directory contents of ${assistantMessage.listFiles}:\n${summary || '(Empty directory)'}${results.truncated ? `\n... and ${results.total - fileItems.length} more items` : ''}`);
             } catch (err) {
               toolResults.push(`Error listing directory ${assistantMessage.listFiles}: ${err.message}`);
             }
@@ -421,7 +489,31 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
       setLoading(false);
       abortControllerRef.current = null;
     }
-  }, [input, loading, apiKey, messages, useContext, activeFile, mode, selectedModel, contextLimit, askBeforeDoing, onApplyEdits, onCreateFile, tasks]);
+  }, [input, loading, apiKey, messages, useContext, activeFile, mode, selectedProvider, selectedModel, contextLimit, askBeforeDoing, onApplyEdits, onCreateFile, tasks, projectDir, runCommand]);
+
+  const handleRetry = useCallback(() => {
+    if (messages.length === 0 || loading) return;
+    
+    // Find last assistant message
+    const lastAssistantIdx = [...messages].reverse().findIndex(m => m.role === 'assistant');
+    if (lastAssistantIdx === -1) return;
+    
+    const actualIdx = messages.length - 1 - lastAssistantIdx;
+    const historyBeforeAssistant = messages.slice(0, actualIdx);
+    const lastUserMessage = historyBeforeAssistant[historyBeforeAssistant.length - 1];
+    
+    if (!lastUserMessage || lastUserMessage.role !== 'user') return;
+
+    // Remove assistant message and its triggering user message
+    // handleSend will re-add the user message
+    const baseHistory = historyBeforeAssistant.slice(0, -1);
+    setMessages(baseHistory);
+    
+    // Use a small timeout to ensure state has updated or handleSend uses the right base
+    setTimeout(() => {
+      handleSend(lastUserMessage.content, baseHistory, 0);
+    }, 0);
+  }, [messages, loading, handleSend]);
 
   const stopGeneration = useCallback(() => {
     if (abortControllerRef.current) {
@@ -459,32 +551,15 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
   }, [handleSend]);
 
   useEffect(() => {
-    const unlisten = listen('terminal-output-default', (event) => {
+    const unlisten = listen(`terminal-output-${activeTerminalId || 'default'}`, (event) => {
       handleCommandFeedback(event.payload);
     });
     return () => {
       unlisten.then(u => u());
     };
-  }, [handleCommandFeedback]);
+  }, [handleCommandFeedback, activeTerminalId]);
 
-  const runCommand = async (cmd) => {
-    try {
-      isCapturing.current = true;
-      terminalBuffer.current = '';
-      // On Windows PowerShell, \r is often more reliable than \n
-      await invoke('write_to_terminal', { id: 'default', data: cmd + '\r' });
-      
-      // Trigger a refresh of the file explorer since the command might have changed the FS
-      if (onRefresh) {
-        // We wait a bit because terminal execution is async in the shell
-        setTimeout(() => onRefresh(), 300);
-        setTimeout(() => onRefresh(), 1000); // Second refresh for slower operations
-      }
-    } catch (err) {
-      console.error("Failed to run command:", err);
-      isCapturing.current = false;
-    }
-  };
+
 
   return (
     <div className="flex flex-col h-full bg-bg-primary relative overflow-hidden border-l border-border">
@@ -492,7 +567,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
       <div className="flex items-center justify-between px-3 border-b border-border bg-bg-primary h-10 flex-shrink-0">
         <div className="flex items-center gap-2 text-text-primary font-semibold text-xs">
           <Sparkles size={14} className="text-accent" />
-          <span>Gemini Assistant</span>
+          <span>Kite Agent</span>
         </div>
         <div className="flex items-center gap-1">
           <button 
@@ -536,23 +611,41 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
             </div>
             
             <div className="p-4 space-y-4">
+              {/* Gemini API Key */}
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-[10px] font-bold text-text-secondary uppercase tracking-widest">
-                  <Key size={12} /> Gemini API Key
+                  <Sparkles size={10} className="text-blue-500" /> Gemini API Key
                 </label>
-                <div className="space-y-2">
-                  <input 
-                    type="password"
-                    value={tempApiKey}
-                    onChange={(e) => setTempApiKey(e.target.value)}
-                    placeholder="Paste your key here..."
-                    className="w-full px-3 py-2 text-xs bg-bg-secondary border border-border rounded-custom focus:outline-none focus:ring-1 focus:ring-accent"
-                  />
-                  <button onClick={handleSaveApiKey} className="w-full bg-accent text-white px-3 py-2 rounded-custom text-xs font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-sm">
-                    <Check size={14} /> Save API Key
-                  </button>
-                </div>
+                <input 
+                  type="password"
+                  value={tempGeminiKey}
+                  onChange={(e) => setTempGeminiKey(e.target.value)}
+                  placeholder="Paste Gemini key..."
+                  className="w-full px-3 py-2 text-xs bg-bg-secondary border border-border rounded-custom focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+                {geminiApiKey && <span className="text-[9px] text-green-500 font-bold flex items-center gap-1"><Check size={10} /> Connected</span>}
               </div>
+
+              <div className="h-[1px] bg-border/50" />
+
+              {/* OpenAI API Key */}
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-[10px] font-bold text-text-secondary uppercase tracking-widest">
+                  <Zap size={10} className="text-green-500" /> OpenAI API Key
+                </label>
+                <input 
+                  type="password"
+                  value={tempOpenaiKey}
+                  onChange={(e) => setTempOpenaiKey(e.target.value)}
+                  placeholder="Paste OpenAI key..."
+                  className="w-full px-3 py-2 text-xs bg-bg-secondary border border-border rounded-custom focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+                {openaiApiKey && <span className="text-[9px] text-green-500 font-bold flex items-center gap-1"><Check size={10} /> Connected</span>}
+              </div>
+
+              <button onClick={handleSaveApiKeys} className="w-full bg-accent text-white px-3 py-2 rounded-custom text-xs font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-sm">
+                <Check size={14} /> Save Keys
+              </button>
 
               <div className="h-[1px] bg-border/50" />
 
@@ -635,7 +728,7 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center opacity-30 py-12 px-6">
             <Sparkles size={48} className="mb-4 text-accent animate-pulse" />
-            <h3 className="text-sm font-bold mb-1 tracking-tight">Kite AI Assistant</h3>
+            <h3 className="text-sm font-bold mb-1 tracking-tight">Kite Agent</h3>
             <p className="text-[11px] max-w-[180px] leading-relaxed">Ask questions about your code or let the Agent build features for you.</p>
           </div>
         )}
@@ -928,18 +1021,32 @@ Format: {"reply": "markdown text", "edits": [], "newFile": null, "listFiles": nu
               </button>
             </div>
 
-            <div className="relative group/model">
-              <select 
-                value={selectedModel} 
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="appearance-none bg-transparent pl-5 pr-4 py-1 text-[10px] font-bold text-text-secondary cursor-pointer hover:text-accent transition-colors focus:outline-none"
-              >
-                {models.map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-              <Sparkles size={10} className="absolute left-0 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <ChevronDown size={10} className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <div className="flex items-center gap-1">
+              <div className="relative">
+                <select 
+                  value={selectedProvider} 
+                  onChange={(e) => handleProviderChange(e.target.value)}
+                  className="appearance-none bg-transparent pl-5 pr-3 py-1 text-[10px] font-black text-text-secondary cursor-pointer hover:text-accent transition-colors focus:outline-none uppercase tracking-wider"
+                >
+                  {providerNames.map(p => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+                <Sparkles size={10} className="absolute left-0 top-1/2 -translate-y-1/2 pointer-events-none text-accent" />
+              </div>
+              <span className="text-text-secondary/30 text-[10px]">/</span>
+              <div className="relative">
+                <select 
+                  value={selectedModel} 
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="appearance-none bg-transparent pl-1 pr-4 py-1 text-[10px] font-bold text-text-secondary cursor-pointer hover:text-accent transition-colors focus:outline-none"
+                >
+                  {(providers[selectedProvider] || []).map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+                <ChevronDown size={10} className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
             </div>
           </div>
         </div>

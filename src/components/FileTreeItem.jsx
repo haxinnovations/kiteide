@@ -40,12 +40,7 @@ const FileTreeItem = ({ file, path, level, onFileClick, onContextMenu, activeFil
     setLoading(true);
     try {
       const result = await invoke('list_files', { dir: fullPath });
-      const sorted = result.sort((a, b) => {
-        if (a.is_dir && !b.is_dir) return -1;
-        if (!a.is_dir && b.is_dir) return 1;
-        return a.name.localeCompare(b.name);
-      });
-      setChildren(sorted);
+      setChildren(result.items || []);
     } catch (error) {
       console.error('Failed to list sub-files:', error);
     } finally {

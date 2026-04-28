@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Globe, Plus, Trash2, Save, Sidebar as SidebarIcon, RefreshCw, Edit3, FolderOpen, FolderPlus, Terminal as TerminalIcon, X, Minus, Square, Sparkles, RotateCcw, RotateCw, Scissors, Copy, CopyPlus, Link, MapPin, ClipboardPaste, Check, MoreVertical, Palette, Code2, FileText, Braces, Image, Settings } from 'lucide-react'
+import { Globe, Plus, Trash2, Save, Sidebar as SidebarIcon, RefreshCw, Edit3, FolderOpen, FolderPlus, Terminal as TerminalIcon, X, Minus, Square, Sparkles, RotateCcw, RotateCw, Scissors, Copy, CopyPlus, Link, MapPin, ClipboardPaste, Check, MoreVertical, Palette, Code2 } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { emit } from '@tauri-apps/api/event'
@@ -8,8 +8,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import Terminal from './components/Terminal'
 import BrowserPanel from './components/BrowserPanel'
 import CodeEditor from './components/CodeEditor'
-import FileTreeItem from './components/FileTreeItem'
+import FileTree from './components/FileTree'
 import LspManager from './components/LspManager'
+import { getFileIcon } from './utils/fileIcons'
 
 const appWindow = getCurrentWindow();
 
@@ -33,33 +34,7 @@ function App() {
     return saved.replace(/\\/g, '/')
   })
 
-  const getFileIcon = (filename) => {
-    const ext = filename.split('.').pop().toLowerCase();
-    const icons = {
-      js: { icon: <img src="/src/assets/icons/js.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
-      jsx: { icon: <img src="/src/assets/icons/react.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
-      ts: { icon: <Code2 size={14} />, color: 'text-blue-600' },
-      tsx: { icon: <Code2 size={14} />, color: 'text-blue-500' },
-      css: { icon: <Palette size={14} />, color: 'text-blue-500' },
-      scss: { icon: <Palette size={14} />, color: 'text-pink-500' },
-      html: { icon: <img src="/src/assets/icons/html.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
-      htm: { icon: <img src="/src/assets/icons/html.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
-      py: { icon: <img src="/src/assets/icons/python.png" className="w-3.5 h-3.5 object-contain" alt="" />, color: '' },
-      json: { icon: <Braces size={14} />, color: 'text-yellow-600' },
-      md: { icon: <FileText size={14} />, color: 'text-text-secondary' },
-      png: { icon: <Image size={14} />, color: 'text-purple-500' },
-      jpg: { icon: <Image size={14} />, color: 'text-purple-500' },
-      svg: { icon: <Image size={14} />, color: 'text-orange-400' },
-      toml: { icon: <Settings size={14} />, color: 'text-text-secondary' },
-      yaml: { icon: <Settings size={14} />, color: 'text-text-secondary' },
-    };
-    const iconData = icons[ext] || { icon: <FileText size={14} />, color: 'text-text-secondary' };
-    return (
-      <span className={`${iconData.color} shrink-0 opacity-80 group-hover:opacity-100 transition-opacity`}>
-        {iconData.icon}
-      </span>
-    );
-  };
+
 
   const [activeFile, setActiveFile] = useState(null)
   const [openFiles, setOpenFiles] = useState([]) // { path, name, content, isDirty }
@@ -129,7 +104,7 @@ function App() {
   const isResizingChat = useRef(false)
 
 
-  const fetchFiles = async (dir = currentDir) => {
+  const fetchFiles = useCallback(async (dir = currentDir) => {
     if (!dir || dir === 'null') return
     setLoading(true)
     try {
@@ -140,7 +115,7 @@ function App() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [currentDir]);
 
   // Initialize CSS Variables from localStorage or defaults
   useEffect(() => {
@@ -214,7 +189,7 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDir])
 
-  const performDelete = async (fullPath) => {
+  const performDelete = useCallback(async (fullPath) => {
     if (!fullPath) return;
     const fileName = getDirName(fullPath);
     const parentPath = getParentDir(fullPath);
@@ -233,7 +208,7 @@ function App() {
     } catch (error) {
       alert('Delete failed: ' + error)
     }
-  };
+  }, [activeFile, fetchFiles]);
 
   const handleDelete = async () => {
     if (!contextMenu?.fullPath) return
@@ -259,7 +234,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedPath]);
+  }, [selectedPath, performDelete]);
 
   const handleOpenFolder = async () => {
     setMenu(null);
@@ -865,10 +840,9 @@ function App() {
 
                 <div className="flex-1 overflow-y-auto py-2">
                   {currentDir ? (
-                    <FileTreeItem 
-                      file={{ name: getDirName(currentDir), is_dir: true }}
-                      path={getParentDir(currentDir)}
-                      level={0}
+                    <FileTree 
+                      key={currentDir}
+                      rootPath={currentDir}
                       onFileClick={handleFileClick}
                       onFolderClick={handleFolderClick}
                       onContextMenu={handleContextMenu}
@@ -948,7 +922,7 @@ function App() {
               <button 
                 onClick={() => setBrowserOpen(!browserOpen)}
                 className={`p-1.5 rounded-lg transition-all ${browserOpen ? 'text-accent bg-accent/10' : 'text-text-secondary hover:bg-bg-secondary'}`}
-                title="Toggle Gemini Assistant"
+                title="Toggle Agent"
               >
                 <Sparkles size={16} />
               </button>
@@ -1098,7 +1072,7 @@ function App() {
         </div>
       </div>
 
-      {/* Gemini Sidebar */}
+      {/* Agent Sidebar */}
         <AnimatePresence>
           {browserOpen && (
             <div className="flex h-full flex-shrink-0 relative group">
@@ -1119,6 +1093,7 @@ function App() {
                   onCreateFile={handleCreateFile}
                   onRefresh={() => fetchFiles()}
                   projectDir={currentDir}
+                  activeTerminalId={activeTerminalId}
                 />
               </motion.div>
             </div>
